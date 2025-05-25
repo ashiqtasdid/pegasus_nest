@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  pegasus-nest:
+    build: .
+    container_name: pegasus-nest
+    restart: always
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./generated:/app/generated
+    environment:
+      - NODE_ENV=production
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
