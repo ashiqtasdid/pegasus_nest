@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -11,7 +13,7 @@ export class GeminiService {
   private readonly logger = new Logger(GeminiService.name);
 
   constructor() {
-    const apiKey = process.env.OPENROUTER_API_KEY || "YOUR_API_KEY";
+    const apiKey = process.env.OPENROUTER_API_KEY || 'YOUR_API_KEY';
     this.openai = new OpenAI({
       baseURL: 'https://openrouter.ai/api/v1',
       apiKey: apiKey,
@@ -20,7 +22,7 @@ export class GeminiService {
         'X-Title': process.env.SITE_NAME || 'Pegasus API',
       },
     });
-    
+
     this.logger.log('OpenRouter service initialized');
   }
 
@@ -41,10 +43,10 @@ export class GeminiService {
       }
 
       this.logger.log('Sending request to OpenRouter...');
-      
+
       // Using only deepseek/deepseek-prover-v2 model as requested
       this.logger.log('Using model: deepseek/deepseek-prover-v2');
-      
+
       const response = await this.openai.chat.completions.create({
         model: 'anthropic/claude-3.7-sonnet',
         messages: [
@@ -58,19 +60,29 @@ export class GeminiService {
       // Extract text from OpenRouter's response format
       const responseText = response.choices[0]?.message?.content;
       if (responseText) {
-        this.logger.log('Successfully received response from deepseek/deepseek-prover-v2');
+        this.logger.log(
+          'Successfully received response from deepseek/deepseek-prover-v2',
+        );
         return responseText;
       } else {
         throw new Error('Model returned empty response');
       }
     } catch (error) {
       this.logger.error(`OpenRouter API error: ${error.message}`);
-      
+
       // Improve error reporting for common issues
-      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
-        throw new Error(`Connection error: Please check your internet connection and firewall settings.`);
+      if (
+        error.code === 'ECONNREFUSED' ||
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ENOTFOUND'
+      ) {
+        throw new Error(
+          `Connection error: Please check your internet connection and firewall settings.`,
+        );
       } else if (error.response?.status === 401) {
-        throw new Error('Authentication error: Invalid API key. Please check your OPENROUTER_API_KEY.');
+        throw new Error(
+          'Authentication error: Invalid API key. Please check your OPENROUTER_API_KEY.',
+        );
       } else if (error.response?.status === 429) {
         throw new Error('Rate limit exceeded. Please try again later.');
       } else {

@@ -14,13 +14,13 @@ import { PluginOperationsService } from './services/plugin-operations.service';
   imports: [],
   controllers: [AppController, CreateController, ChatController],
   providers: [
-    AppService, 
-    CreateService, 
-    FileCompilerService, 
+    AppService,
+    CreateService,
+    FileCompilerService,
     GeminiService,
     CodeCompilerService,
     ChatStorageService,
-    PluginOperationsService
-  ]
+    PluginOperationsService,
+  ],
 })
 export class AppModule {}

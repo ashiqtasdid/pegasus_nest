@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { Injectable } from '@nestjs/common';
 import { CreateRequestDto } from 'src/create/dto/create-request.dto';
 

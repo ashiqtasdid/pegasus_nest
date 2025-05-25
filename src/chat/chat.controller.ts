@@ -1,10 +1,17 @@
-import { Controller, Post, Body, Get, Param } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Param,
+  NotFoundException,
+} from '@nestjs/common';
 import { ChatStorageService } from '../services/chat-storage.service';
 import { GeminiService } from '../services/gemini.service';
 import { CreateService } from '../services/create.service';
 import { CodeCompilerService } from '../services/code-compiler.service';
 import { PluginOperationsService } from '../services/plugin-operations.service';
-import { ChatSession, ChatMessage } from '../models/chat-session.model';
+import { ChatSession } from '../models/chat-session.model';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ChatMessageDto } from './dto/chat-message.dto';
@@ -17,30 +24,42 @@ export class ChatController {
     private readonly pluginOperationsService: PluginOperationsService,
     private readonly createService: CreateService,
     private readonly codeCompilerService: CodeCompilerService,
-  ) { }
+  ) {}
 
   @Post('message')
-  async sendMessage(@Body() messageDto: ChatMessageDto) {
-    let session;
+  async sendMessage(
+    @Body() messageDto: ChatMessageDto,
+  ): Promise<{ success: boolean; session: ChatSession }> {
+    let session: ChatSession;
 
     // Create a new session or get existing one
     if (messageDto.sessionId) {
-      session = await this.chatStorageService.getSession(messageDto.sessionId);
-      if (!session) {
+      const retrievedSession = await this.chatStorageService.getSession(
+        messageDto.sessionId,
+      );
+      if (!retrievedSession) {
         throw new Error(`Session with ID ${messageDto.sessionId} not found`);
       }
+      session = retrievedSession;
     } else if (messageDto.pluginName) {
       // Check if there are existing sessions for this plugin
-      const existingSessions = await this.chatStorageService.listSessionsByPlugin(messageDto.pluginName);
+      const existingSessions =
+        await this.chatStorageService.listSessionsByPlugin(
+          messageDto.pluginName,
+        );
 
       if (existingSessions.length > 0) {
         // Use the most recent session
-        session = existingSessions.sort((a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        session = existingSessions.sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
         )[0];
       } else {
         // Create a new session
-        session = await this.chatStorageService.createSession(messageDto.pluginName);
+        const newSession = await this.chatStorageService.createSession(
+          messageDto.pluginName,
+        );
+        session = newSession;
       }
     } else {
       throw new Error('Either sessionId or pluginName must be provided');
@@ -50,7 +69,7 @@ export class ChatController {
     await this.chatStorageService.addMessage(session.id, {
       role: 'user',
       content: messageDto.content,
-      timestamp: new Date()
+      timestamp: new Date(),
     });
 
     // Check if this is a command or action request
@@ -62,33 +81,41 @@ export class ChatController {
       await this.chatStorageService.addMessage(session.id, {
         role: 'system',
         content: `Generating plugin '${session.pluginName}' with prompt: ${prompt}`,
-        timestamp: new Date()
+        timestamp: new Date(),
       });
 
       try {
         const result = await this.pluginOperationsService.createPlugin({
           name: session.pluginName,
-          prompt: prompt
+          prompt: prompt,
         });
 
         // Add result as assistant message
         await this.chatStorageService.addMessage(session.id, {
           role: 'assistant',
           content: `Plugin generation complete: ${result}`,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
 
         // Return the updated session
+        const updatedSession = await this.chatStorageService.getSession(
+          session.id,
+        );
+        if (!updatedSession) {
+          throw new Error(`Session with ID ${session.id} not found`);
+        }
         return {
           success: true,
-          session: await this.chatStorageService.getSession(session.id)
+          session: updatedSession,
         };
-      } catch (error) {
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         // Add error as system message
         await this.chatStorageService.addMessage(session.id, {
           role: 'system',
-          content: `Error during plugin generation: ${error.message}`,
-          timestamp: new Date()
+          content: `Error during plugin generation: ${errorMessage}`,
+          timestamp: new Date(),
         });
 
         throw error;
@@ -98,38 +125,46 @@ export class ChatController {
       await this.chatStorageService.addMessage(session.id, {
         role: 'system',
         content: `Compiling plugin '${session.pluginName}'...`,
-        timestamp: new Date()
+        timestamp: new Date(),
       });
 
       try {
         const result = await this.codeCompilerService.compileMavenProject(
           session.pluginPath,
-          false
+          false,
         );
 
         if (result.success) {
           await this.chatStorageService.addMessage(session.id, {
             role: 'assistant',
             content: `Compilation successful! Artifact: ${result.artifactPath}`,
-            timestamp: new Date()
+            timestamp: new Date(),
           });
         } else {
           await this.chatStorageService.addMessage(session.id, {
             role: 'assistant',
             content: `Compilation failed: ${result.error}\n\nHere's what happened:\n${result.output}`,
-            timestamp: new Date()
+            timestamp: new Date(),
           });
         }
 
+        const updatedSession = await this.chatStorageService.getSession(
+          session.id,
+        );
+        if (!updatedSession) {
+          throw new Error(`Session with ID ${session.id} not found`);
+        }
         return {
           success: true,
-          session: await this.chatStorageService.getSession(session.id)
+          session: updatedSession,
         };
-      } catch (error) {
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         await this.chatStorageService.addMessage(session.id, {
           role: 'system',
-          content: `Error during compilation: ${error.message}`,
-          timestamp: new Date()
+          content: `Error during compilation: ${errorMessage}`,
+          timestamp: new Date(),
         });
 
         throw error;
@@ -141,7 +176,7 @@ export class ChatController {
 
       // Include information about plugin structure if it exists
       if (fs.existsSync(session.pluginPath)) {
-        contextPrompt += "The plugin has these key files:\n";
+        contextPrompt += 'The plugin has these key files:\n';
 
         // Add information about key files
         const pluginFiles = this.getKeyPluginFiles(session.pluginPath);
@@ -158,19 +193,27 @@ export class ChatController {
         await this.chatStorageService.addMessage(session.id, {
           role: 'assistant',
           content: aiResponse,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
 
         // Return the updated session
+        const updatedSession = await this.chatStorageService.getSession(
+          session.id,
+        );
+        if (!updatedSession) {
+          throw new Error(`Session with ID ${session.id} not found`);
+        }
         return {
           success: true,
-          session: await this.chatStorageService.getSession(session.id)
+          session: updatedSession,
         };
-      } catch (error) {
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         await this.chatStorageService.addMessage(session.id, {
           role: 'system',
-          content: `Error getting AI response: ${error.message}`,
-          timestamp: new Date()
+          content: `Error getting AI response: ${errorMessage}`,
+          timestamp: new Date(),
         });
 
         throw error;
@@ -179,18 +222,26 @@ export class ChatController {
   }
 
   @Get('sessions/:pluginName')
-  async getSessionsByPlugin(@Param('pluginName') pluginName: string) {
+  async getSessionsByPlugin(
+    @Param('pluginName') pluginName: string,
+  ): Promise<ChatSession[]> {
     return await this.chatStorageService.listSessionsByPlugin(pluginName);
   }
 
   @Get('session/:sessionId')
-  async getSession(@Param('sessionId') sessionId: string) {
-    return await this.chatStorageService.getSession(sessionId);
+  async getSession(
+    @Param('sessionId') sessionId: string,
+  ): Promise<ChatSession> {
+    const session = await this.chatStorageService.getSession(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Session with ID ${sessionId} not found`);
+    }
+    return session; // No assertion needed after null check
   }
 
   // Helper methods
   private getKeyPluginFiles(pluginPath: string): string[] {
-    const result: string[] = []; // Add explicit type here
+    const result: string[] = [];
 
     // Check for pom.xml
     const pomPath = path.join(pluginPath, 'pom.xml');
@@ -199,7 +250,13 @@ export class ChatController {
     }
 
     // Check for plugin.yml
-    const pluginYmlPath = path.join(pluginPath, 'src', 'main', 'resources', 'plugin.yml');
+    const pluginYmlPath = path.join(
+      pluginPath,
+      'src',
+      'main',
+      'resources',
+      'plugin.yml',
+    );
     if (fs.existsSync(pluginYmlPath)) {
       result.push('plugin.yml - Plugin configuration file');
     }
@@ -208,17 +265,24 @@ export class ChatController {
     const javaDir = path.join(pluginPath, 'src', 'main', 'java');
     if (fs.existsSync(javaDir)) {
       // Find Java files (limit to 5 for brevity)
-      let javaFiles = this.findFilesRecursively(javaDir, '.java', 5);
-      result.push(...javaFiles.map(f => `${path.relative(pluginPath, f)} - Java class file`));
+      const javaFiles = this.findFilesRecursively(javaDir, '.java', 5);
+      result.push(
+        ...javaFiles.map(
+          (f) => `${path.relative(pluginPath, f)} - Java class file`,
+        ),
+      );
     }
 
     return result;
   }
 
-  private findFilesRecursively(dir: string, extension: string, limit: number): string[] {
-    const results: string[] = []; // Add explicit type here
+  private findFilesRecursively(
+    dir: string,
+    extension: string,
+    limit: number,
+  ): string[] {
+    const results: string[] = [];
 
-    // Rest of method remains the same
     if (!fs.existsSync(dir)) {
       return results;
     }
@@ -232,7 +296,13 @@ export class ChatController {
       const stat = fs.statSync(itemPath);
 
       if (stat.isDirectory()) {
-        results.push(...this.findFilesRecursively(itemPath, extension, limit - results.length));
+        results.push(
+          ...this.findFilesRecursively(
+            itemPath,
+            extension,
+            limit - results.length,
+          ),
+        );
       } else if (item.endsWith(extension)) {
         results.push(itemPath);
       }
@@ -241,8 +311,11 @@ export class ChatController {
     return results;
   }
 
-  private buildPromptFromChatHistory(session: ChatSession, contextPrefix: string): string {
-    let prompt = contextPrefix + "\n\n";
+  private buildPromptFromChatHistory(
+    session: ChatSession,
+    contextPrefix: string,
+  ): string {
+    let prompt = contextPrefix + '\n\n';
 
     // Add recent chat history (last 10 messages)
     const recentMessages = session.messages.slice(-10);
@@ -251,7 +324,8 @@ export class ChatController {
       prompt += `${role}: ${msg.content}\n\n`;
     }
 
-    prompt += "Please provide helpful information about Minecraft plugin development, fix code issues, or suggest improvements.";
+    prompt +=
+      'Please provide helpful information about Minecraft plugin development, fix code issues, or suggest improvements.';
 
     return prompt;
   }

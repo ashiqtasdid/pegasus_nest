@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import * as fs from 'fs/promises'; // Using fs.promises for async/await
 import * as path from 'path';
 import { Injectable, Logger } from '@nestjs/common';
@@ -79,9 +80,7 @@ export class FileCompilerService {
       this.logger.error(
         `Error during compilation or writing output file: ${error.message}`,
       );
-      throw new Error(
-        `Failed to compile directory to text: ${error.message}`,
-      );
+      throw new Error(`Failed to compile directory to text: ${error.message}`);
     }
   }
 }

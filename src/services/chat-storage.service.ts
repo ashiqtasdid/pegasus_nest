@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { Injectable } from '@nestjs/common';
 import { ChatSession, ChatMessage } from '../models/chat-session.model';
 import * as fs from 'fs';
@@ -23,7 +24,7 @@ export class ChatStorageService {
       messages: [],
       createdAt: new Date(),
       updatedAt: new Date(),
-      status: 'active'
+      status: 'active',
     };
 
     await this.saveSession(session);
@@ -46,7 +47,10 @@ export class ChatStorageService {
     fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
   }
 
-  async addMessage(sessionId: string, message: ChatMessage): Promise<ChatSession> {
+  async addMessage(
+    sessionId: string,
+    message: ChatMessage,
+  ): Promise<ChatSession> {
     const session = await this.getSession(sessionId);
     if (!session) {
       throw new Error(`Session with ID ${sessionId} not found`);
@@ -62,7 +66,7 @@ export class ChatStorageService {
     // Read all chat sessions and filter by plugin name
     const sessions: ChatSession[] = [];
     const files = fs.readdirSync(this.chatDir);
-    
+
     for (const file of files) {
       if (file.endsWith('.json')) {
         const data = fs.readFileSync(path.join(this.chatDir, file), 'utf8');
@@ -72,7 +76,7 @@ export class ChatStorageService {
         }
       }
     }
-    
+
     return sessions;
   }
 }
