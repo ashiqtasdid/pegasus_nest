@@ -280,6 +280,8 @@
 
       let currentPluginName = '';
 
+      const apiBaseUrl = window.location.origin;
+
       async function generatePlugin() {
         const pluginName = document.getElementById('pluginName').value.trim();
         const pluginPrompt = document
@@ -353,7 +355,7 @@
 
         try {
           const endpoint = useAutoFix ? '/create/auto' : '/create';
-          const response = await fetch(`http://localhost:3000${endpoint}`, {
+          const response = await fetch(`${endpoint}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -461,7 +463,7 @@
 
         try {
           // Create a URL to the download endpoint
-          const downloadUrl = `http://localhost:3000/create/download/${currentPluginName}`;
+          const downloadUrl = `/create/download/${currentPluginName}`;
 
           // Open the download URL in a new tab/window
           window.open(downloadUrl, '_blank');
