@@ -8,7 +8,9 @@ services:
     ports:
       - '3000:3000'
     volumes:
-      - ./generated:/app/generated
+      - type: bind
+        source: ./generated
+        target: /app/generated
     environment:
       - NODE_ENV=production
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
