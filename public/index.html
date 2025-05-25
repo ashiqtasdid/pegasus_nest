@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Plugin Generator</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        textarea, input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            min-height: 150px;
+            resize: vertical;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            display: block;
+            margin: 20px auto;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .response {
+            margin-top: 20px;
+            padding: 15px;
+            border-left: 4px solid #4CAF50;
+            background-color: #f9f9f9;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+        .error {
+            border-left-color: #f44336;
+        }
+        .tab {
+            overflow: hidden;
+            border: 1px solid #ccc;
+            background-color: #f1f1f1;
+            border-radius: 4px 4px 0 0;
+        }
+        .tab button {
+            background-color: inherit;
+            float: left;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            padding: 14px 16px;
+            margin: 0;
+            transition: 0.3s;
+            color: #333;
+        }
+        .tab button:hover {
+            background-color: #ddd;
+        }
+        .tab button.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .tabcontent {
+            display: none;
+            padding: 6px 12px;
+            border: 1px solid #ccc;
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+            animation: fadeEffect 1s;
+        }
+        @keyframes fadeEffect {
+            from {opacity: 0;}
+            to {opacity: 1;}
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Minecraft Plugin Generator</h1>
+        
+        <div class="tab">
+            <button class="tablinks active" onclick="openTab(event, 'Generate')">Generate Plugin</button>
+            <button class="tablinks" onclick="openTab(event, 'Chat')">Chat Interface</button>
+        </div>
+        
+        <div id="Generate" class="tabcontent" style="display: block;">
+            <h2>Generate a New Plugin</h2>
+            <div>
+                <label for="pluginName">Plugin Name:</label>
+                <input type="text" id="pluginName" placeholder="Enter a name for your plugin">
+                
+                <label for="pluginPrompt">Description/Prompt:</label>
+                <textarea id="pluginPrompt" placeholder="Describe what you want your plugin to do..."></textarea>
+                
+                <div>
+                    <input type="checkbox" id="useAutoFix" checked>
+                    <label for="useAutoFix">Use auto-fix for compilation errors</label>
+                </div>
+                
+                <button onclick="generatePlugin()">Generate Plugin</button>
+            </div>
+            <div id="generateResponse" class="response" style="display: none;"></div>
+        </div>
+        
+        <div id="Chat" class="tabcontent">
+            <h2>Chat with the Plugin Assistant</h2>
+            <div>
+                <label for="chatPluginName">Plugin Name:</label>
+                <input type="text" id="chatPluginName" placeholder="Enter your plugin name">
+                
+                <label for="sessionId">Session ID (leave empty for new session):</label>
+                <input type="text" id="sessionId" placeholder="Optional: Enter existing session ID">
+                
+                <label for="chatMessage">Message:</label>
+                <textarea id="chatMessage" placeholder="Type your message or command (e.g., /generate Create a plugin that...)"></textarea>
+                
+                <button onclick="sendChatMessage()">Send Message</button>
+            </div>
+            <div id="chatHistory" class="response" style="display: none; max-height: 400px; overflow-y: auto;"></div>
+        </div>
+    </div>
+    
+    <script>
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tablinks");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+        
+        async function generatePlugin() {
+            const pluginName = document.getElementById('pluginName').value.trim();
+            const pluginPrompt = document.getElementById('pluginPrompt').value.trim();
+            const useAutoFix = document.getElementById('useAutoFix').checked;
+            const responseElement = document.getElementById('generateResponse');
+            
+            if (!pluginName || !pluginPrompt) {
+                responseElement.textContent = "Error: Please provide both plugin name and description.";
+                responseElement.style.display = "block";
+                responseElement.className = "response error";
+                return;
+            }
+            
+            responseElement.textContent = "Generating plugin... This may take a few minutes.";
+            responseElement.style.display = "block";
+            responseElement.className = "response";
+            
+            try {
+                const endpoint = useAutoFix ? '/create/auto' : '/create';
+                const response = await fetch(`http://localhost:3000${endpoint}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: pluginName,
+                        prompt: pluginPrompt
+                    })
+                });
+                
+                const result = await response.text();
+                responseElement.textContent = result;
+                
+                // Extract session ID if available
+                const sessionMatch = result.match(/Chat session ID: ([0-9a-f-]+)/);
+                if (sessionMatch && sessionMatch[1]) {
+                    responseElement.textContent += "\n\nYou can continue working with this plugin in the Chat tab using this session ID.";
+                }
+            } catch (error) {
+                responseElement.textContent = `Error: ${error.message}`;
+                responseElement.className = "response error";
+            }
+        }
+        
+        async function sendChatMessage() {
+            const pluginName = document.getElementById('chatPluginName').value.trim();
+            const sessionId = document.getElementById('sessionId').value.trim();
+            const message = document.getElementById('chatMessage').value.trim();
+            const chatHistoryElement = document.getElementById('chatHistory');
+            
+            if ((!pluginName && !sessionId) || !message) {
+                chatHistoryElement.textContent = "Error: Please provide either plugin name or session ID, and a message.";
+                chatHistoryElement.style.display = "block";
+                chatHistoryElement.className = "response error";
+                return;
+            }
+            
+            if (!chatHistoryElement.style.display || chatHistoryElement.style.display === "none") {
+                chatHistoryElement.textContent = "";
+                chatHistoryElement.style.display = "block";
+                chatHistoryElement.className = "response";
+            }
+            
+            chatHistoryElement.textContent += `YOU: ${message}\n\n`;
+            chatHistoryElement.textContent += "Processing...\n\n";
+            chatHistoryElement.scrollTop = chatHistoryElement.scrollHeight;
+            
+            try {
+                const response = await fetch('http://localhost:3000/chat/message', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        pluginName: pluginName || undefined,
+                        sessionId: sessionId || undefined,
+                        content: message
+                    })
+                });
+                
+                const result = await response.json();
+                
+                // Remove the "Processing..." line
+                chatHistoryElement.textContent = chatHistoryElement.textContent.replace("Processing...\n\n", "");
+                
+                if (result.success && result.session) {
+                    // Update session ID field if it was empty
+                    if (!sessionId) {
+                        document.getElementById('sessionId').value = result.session.id;
+                    }
+                    
+                    // Display the latest message from the assistant
+                    const latestMessage = result.session.messages[result.session.messages.length - 1];
+                    if (latestMessage && latestMessage.role === 'assistant') {
+                        chatHistoryElement.textContent += `AI: ${latestMessage.content}\n\n`;
+                    }
+                } else {
+                    chatHistoryElement.textContent += `Error: ${JSON.stringify(result)}\n\n`;
+                }
+                
+                chatHistoryElement.scrollTop = chatHistoryElement.scrollHeight;
+                document.getElementById('chatMessage').value = "";
+            } catch (error) {
+                chatHistoryElement.textContent = chatHistoryElement.textContent.replace("Processing...\n\n", "");
+                chatHistoryElement.textContent += `Error: ${error.message}\n\n`;
+                chatHistoryElement.scrollTop = chatHistoryElement.scrollHeight;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,12 +1,22 @@
-import { Controller, Get } from '@nestjs/common';
-import { AppService } from './app.service';
+import { Controller, Get, Res, Logger } from '@nestjs/common';
+import { Response } from 'express';
+import { join } from 'path';
+import { existsSync } from 'fs';
 
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  private readonly logger = new Logger(AppController.name);
 
-  @Get()
-  getHello(): string {
-    return this.appService.getHello();
+  @Get('ui')
+  serveUi(@Res() res: Response) {
+    const filePath = join(process.cwd(), 'public', 'index.html');
+    this.logger.log(`Attempting to serve UI from: ${filePath}`);
+    
+    if (!existsSync(filePath)) {
+      this.logger.error(`File not found: ${filePath}`);
+      return res.status(404).send('UI file not found. Make sure public/index.html exists.');
+    }
+    
+    return res.sendFile(filePath);
   }
 }
