@@ -23,6 +23,7 @@
             },
             animation: {
               'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'bounce-slow': 'bounce 2s infinite',
             },
             colors: {
               dark: {
@@ -51,12 +52,44 @@
         transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
         transition-duration: 300ms;
       }
+
+      /* Scrollbar styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 10px;
+      }
+
+      .dark ::-webkit-scrollbar-track {
+        background: #2d2d2d;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 10px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #555;
+      }
+
+      .dark ::-webkit-scrollbar-thumb {
+        background: #555;
+      }
+
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: #777;
+      }
     </style>
   </head>
   <body
     class="bg-slate-50 dark:bg-dark-900 min-h-screen py-12 px-4 font-sans transition-colors"
   >
-    <div class="max-w-2xl mx-auto">
+    <div class="max-w-3xl mx-auto">
       <!-- Header with icon and dark mode toggle -->
       <div class="flex items-center justify-between mb-8">
         <div class="flex items-center">
@@ -79,9 +112,14 @@
             <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
             <line x1="12" y1="22.08" x2="12" y2="12"></line>
           </svg>
-          <h1 class="text-3xl font-bold text-slate-800 dark:text-white ml-3">
-            Plugin Generator
-          </h1>
+          <div class="ml-3">
+            <h1 class="text-3xl font-bold text-slate-800 dark:text-white">
+              Plugin Generator
+            </h1>
+            <p class="text-sm text-slate-600 dark:text-slate-400">
+              Create custom Minecraft plugins with AI
+            </p>
+          </div>
         </div>
 
         <!-- Dark mode toggle -->
@@ -124,7 +162,7 @@
       </div>
 
       <div
-        class="bg-white dark:bg-dark-800 rounded-xl shadow-lg overflow-hidden border border-slate-100 dark:border-dark-700 transition-all hover:shadow-xl"
+        class="bg-white dark:bg-dark-800 rounded-xl shadow-lg overflow-hidden border border-slate-100 dark:border-dark-700 transition-all hover:shadow-xl mb-6"
       >
         <!-- Card header -->
         <div
@@ -145,7 +183,7 @@
               for="pluginName"
               class="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1"
             >
-              Plugin Name
+              Plugin Name <span class="text-red-500">*</span>
             </label>
             <div class="relative">
               <input
@@ -153,6 +191,7 @@
                 id="pluginName"
                 placeholder="Enter a name for your plugin"
                 class="w-full px-4 py-3 border border-slate-200 dark:border-dark-600 rounded-lg shadow-sm bg-white dark:bg-dark-700 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+                required
               />
               <div
                 class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none opacity-0 group-focus-within:opacity-100 transition-opacity"
@@ -171,6 +210,10 @@
                 </svg>
               </div>
             </div>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Use alphanumeric characters and underscores only (e.g., MyPlugin,
+              Economy_Plugin)
+            </p>
           </div>
 
           <div>
@@ -178,30 +221,18 @@
               for="pluginPrompt"
               class="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1"
             >
-              Description/Prompt
+              Description/Prompt <span class="text-red-500">*</span>
             </label>
             <textarea
               id="pluginPrompt"
               placeholder="Describe what you want your plugin to do... (be specific about features, commands, events, etc.)"
               class="w-full px-4 py-3 border border-slate-200 dark:border-dark-600 rounded-lg shadow-sm bg-white dark:bg-dark-700 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all min-h-[180px] resize-y"
+              required
             ></textarea>
-          </div>
-
-          <div
-            class="flex items-center bg-slate-50 dark:bg-dark-700 p-3 rounded-lg"
-          >
-            <input
-              type="checkbox"
-              id="useAutoFix"
-              checked
-              class="h-5 w-5 text-emerald-500 focus:ring-emerald-400 border-slate-300 dark:border-dark-500 rounded transition-colors"
-            />
-            <label
-              for="useAutoFix"
-              class="ml-3 block text-sm text-slate-700 dark:text-slate-200 font-medium"
-            >
-              Use auto-fix for compilation errors
-            </label>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              The more details you provide, the better your plugin will be.
+              Include commands, permissions, and functionality.
+            </p>
           </div>
 
           <button
@@ -214,35 +245,148 @@
         </div>
       </div>
 
+      <!-- Process steps indicator (initially hidden) -->
+      <div id="processSteps" class="hidden mb-6">
+        <div
+          class="flex items-center justify-between w-full bg-white dark:bg-dark-800 rounded-lg p-4 border border-slate-200 dark:border-dark-700"
+        >
+          <div class="flex flex-col items-center">
+            <div
+              id="step1"
+              class="w-8 h-8 rounded-full flex items-center justify-center bg-slate-200 dark:bg-dark-600 text-slate-700 dark:text-slate-300"
+            >
+              1
+            </div>
+            <span class="text-xs mt-1 text-slate-600 dark:text-slate-400"
+              >Extract</span
+            >
+          </div>
+          <div class="h-1 flex-1 mx-2 bg-slate-200 dark:bg-dark-600"></div>
+          <div class="flex flex-col items-center">
+            <div
+              id="step2"
+              class="w-8 h-8 rounded-full flex items-center justify-center bg-slate-200 dark:bg-dark-600 text-slate-700 dark:text-slate-300"
+            >
+              2
+            </div>
+            <span class="text-xs mt-1 text-slate-600 dark:text-slate-400"
+              >Process</span
+            >
+          </div>
+          <div class="h-1 flex-1 mx-2 bg-slate-200 dark:bg-dark-600"></div>
+          <div class="flex flex-col items-center">
+            <div
+              id="step3"
+              class="w-8 h-8 rounded-full flex items-center justify-center bg-slate-200 dark:bg-dark-600 text-slate-700 dark:text-slate-300"
+            >
+              3
+            </div>
+            <span class="text-xs mt-1 text-slate-600 dark:text-slate-400"
+              >Generate</span
+            >
+          </div>
+          <div class="h-1 flex-1 mx-2 bg-slate-200 dark:bg-dark-600"></div>
+          <div class="flex flex-col items-center">
+            <div
+              id="step4"
+              class="w-8 h-8 rounded-full flex items-center justify-center bg-slate-200 dark:bg-dark-600 text-slate-700 dark:text-slate-300"
+            >
+              4
+            </div>
+            <span class="text-xs mt-1 text-slate-600 dark:text-slate-400"
+              >Compile</span
+            >
+          </div>
+        </div>
+      </div>
+
       <!-- Response section with better styling -->
       <div
         id="generateResponse"
-        class="hidden mt-6 p-5 bg-white dark:bg-dark-800 border border-slate-200 dark:border-dark-700 rounded-xl shadow-md whitespace-pre-wrap overflow-x-auto transition-all text-slate-800 dark:text-slate-200"
+        class="hidden mt-6 p-5 bg-white dark:bg-dark-800 border border-slate-200 dark:border-dark-700 rounded-xl shadow-md whitespace-pre-wrap overflow-x-auto transition-all text-slate-800 dark:text-slate-200 max-h-[400px] overflow-y-auto"
       ></div>
 
       <!-- Download section -->
-      <div id="downloadSection" class="hidden mt-6 flex justify-center">
-        <button
-          id="downloadBtn"
-          onclick="downloadPlugin()"
-          class="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium py-3 px-8 rounded-lg transition duration-200 ease-in-out transform hover:-translate-y-1 shadow-md hover:shadow-lg flex items-center"
+      <div id="downloadSection" class="hidden mt-6">
+        <div
+          class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-4 mb-4 text-emerald-700 dark:text-emerald-400"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            class="h-5 w-5 mr-2"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+          <div class="flex items-start">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-6 w-6 mr-2 flex-shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <div>
+              <p class="font-medium">Plugin successfully generated!</p>
+              <p class="text-sm mt-1">
+                Your plugin is now ready for download. You can use it in your
+                Minecraft server.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+          <button
+            id="downloadBtn"
+            onclick="downloadPlugin()"
+            class="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium py-3 px-8 rounded-lg transition duration-200 ease-in-out transform hover:-translate-y-1 shadow-md hover:shadow-lg flex items-center justify-center"
           >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-            />
-          </svg>
-          Download Plugin
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-5 w-5 mr-2"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+            Download Plugin JAR
+          </button>
+
+          <button
+            id="generateNewBtn"
+            onclick="resetForm()"
+            class="bg-slate-200 hover:bg-slate-300 dark:bg-dark-700 dark:hover:bg-dark-600 text-slate-700 dark:text-slate-200 font-medium py-3 px-8 rounded-lg transition duration-200 ease-in-out transform hover:-translate-y-1 shadow-md hover:shadow-lg flex items-center justify-center"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-5 w-5 mr-2"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            Create Another Plugin
+          </button>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="mt-12 text-center text-sm text-slate-500 dark:text-slate-400">
+        <p>Minecraft Plugin Generator powered by AI</p>
+        <p class="mt-1">© 2025 Pegasus Nest</p>
       </div>
     </div>
 
@@ -282,19 +426,74 @@
 
       const apiBaseUrl = window.location.origin;
 
+      // Update process steps indicator
+      function updateProcessStep(step) {
+        document.getElementById('processSteps').classList.remove('hidden');
+
+        // Reset all steps
+        for (let i = 1; i <= 4; i++) {
+          const stepEl = document.getElementById(`step${i}`);
+          stepEl.classList.remove(
+            'bg-emerald-500',
+            'text-white',
+            'animate-pulse',
+          );
+          stepEl.classList.add(
+            'bg-slate-200',
+            'dark:bg-dark-600',
+            'text-slate-700',
+            'dark:text-slate-300',
+          );
+        }
+
+        // Set completed steps
+        for (let i = 1; i < step; i++) {
+          const stepEl = document.getElementById(`step${i}`);
+          stepEl.classList.remove(
+            'bg-slate-200',
+            'dark:bg-dark-600',
+            'text-slate-700',
+            'dark:text-slate-300',
+          );
+          stepEl.classList.add('bg-emerald-500', 'text-white');
+          stepEl.innerHTML = '✓';
+        }
+
+        // Set current step
+        const currentStep = document.getElementById(`step${step}`);
+        currentStep.classList.remove(
+          'bg-slate-200',
+          'dark:bg-dark-600',
+          'text-slate-700',
+          'dark:text-slate-300',
+        );
+        currentStep.classList.add(
+          'bg-emerald-500',
+          'text-white',
+          'animate-pulse',
+        );
+      }
+
+      function resetForm() {
+        document.getElementById('pluginName').value = '';
+        document.getElementById('pluginPrompt').value = '';
+        document.getElementById('generateResponse').classList.add('hidden');
+        document.getElementById('downloadSection').classList.add('hidden');
+        document.getElementById('processSteps').classList.add('hidden');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
       async function generatePlugin() {
         const pluginName = document.getElementById('pluginName').value.trim();
         const pluginPrompt = document
           .getElementById('pluginPrompt')
           .value.trim();
-        const useAutoFix = document.getElementById('useAutoFix').checked;
         const responseElement = document.getElementById('generateResponse');
         const downloadSection = document.getElementById('downloadSection');
         const generateBtn = document.getElementById('generateBtn');
+        const processSteps = document.getElementById('processSteps');
 
-        // Hide download section when starting a new generation
-        downloadSection.classList.add('hidden');
-
+        // Simple validation
         if (!pluginName || !pluginPrompt) {
           responseElement.textContent =
             'Error: Please provide both plugin name and description.';
@@ -316,6 +515,34 @@
           return;
         }
 
+        // Validate plugin name (alphanumeric, underscores)
+        if (!/^[a-zA-Z0-9_]+$/.test(pluginName)) {
+          responseElement.textContent =
+            'Error: Plugin name must contain only letters, numbers, and underscores.';
+          responseElement.classList.remove(
+            'hidden',
+            'border-emerald-200',
+            'bg-emerald-50',
+            'dark:bg-emerald-900/20',
+            'dark:border-emerald-800',
+          );
+          responseElement.classList.add(
+            'border-red-200',
+            'bg-red-50',
+            'dark:bg-red-900/20',
+            'dark:border-red-800',
+            'text-red-700',
+            'dark:text-red-400',
+          );
+          return;
+        }
+
+        // Hide download section when starting a new generation
+        downloadSection.classList.add('hidden');
+
+        // Show process steps indicator
+        updateProcessStep(1);
+
         // Show loading state
         generateBtn.disabled = true;
         generateBtn.innerHTML = `
@@ -332,7 +559,10 @@
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span>Generating plugin... This may take a few minutes.</span>
+            <div>
+              <p class="font-medium">Generating plugin...</p>
+              <p class="text-sm">This may take a few minutes. Please don't close this window.</p>
+            </div>
           </div>
         `;
         responseElement.classList.remove(
@@ -354,8 +584,11 @@
         );
 
         try {
-          const endpoint = useAutoFix ? '/create/auto' : '/create';
-          const response = await fetch(`${endpoint}`, {
+          // Simulate different stages for UI feedback
+          setTimeout(() => updateProcessStep(2), 2000);
+
+          // Always use the '/create' endpoint
+          const response = await fetch('/create', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -366,13 +599,27 @@
             }),
           });
 
+          // Simulate different stages for UI feedback
+          setTimeout(() => updateProcessStep(3), 4000);
+          setTimeout(() => updateProcessStep(4), 6000);
+
           const result = await response.text();
 
           // Format the response with some HTML for better readability
-          const formattedResult = result.replace(
-            /(\[Agent\].*)/g,
-            '<span class="text-emerald-600 dark:text-emerald-400 font-medium">$1</span>',
-          );
+          const formattedResult = result
+            .replace(
+              /(\[Agent\].*?:)/g,
+              '<span class="text-emerald-600 dark:text-emerald-400 font-medium">$1</span>',
+            )
+            .replace(
+              /(Error:.*)/g,
+              '<span class="text-red-600 dark:text-red-400 font-medium">$1</span>',
+            )
+            .replace(
+              /(WARNING:.*)/g,
+              '<span class="text-amber-600 dark:text-amber-400 font-medium">$1</span>',
+            );
+
           responseElement.innerHTML = formattedResult;
 
           // Store the current plugin name for download
@@ -421,7 +668,15 @@
             );
           }
         } catch (error) {
-          responseElement.innerHTML = `<span class="text-red-600 dark:text-red-400 font-medium">Error:</span> ${error.message}`;
+          responseElement.innerHTML = `<div class="flex items-start">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-500 mr-2 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+            </svg>
+            <div>
+              <div class="font-medium text-red-600 dark:text-red-400">Error</div>
+              <div>${error.message}</div>
+            </div>
+          </div>`;
           responseElement.classList.add(
             'border-red-200',
             'bg-red-50',
@@ -474,7 +729,7 @@
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              Download Plugin
+              Download Plugin JAR
             `;
             downloadBtn.disabled = false;
           }, 2000);
@@ -484,7 +739,7 @@
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Download Plugin
+            Download Plugin JAR
           `;
           downloadBtn.disabled = false;
         }

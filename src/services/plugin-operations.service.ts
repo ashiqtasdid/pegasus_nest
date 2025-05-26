@@ -7,14 +7,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CreateRequestDto } from '../create/dto/create-request.dto';
 import { GeminiService } from './gemini.service';
 import { CodeCompilerService } from './code-compiler.service';
-import { ChatStorageService } from './chat-storage.service';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ChatSession } from '../models/chat-session.model';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execPromise = promisify(exec);
+
+interface FixResult {
+  success: boolean;
+  message: string;
+  artifactPath?: string;
+}
 
 @Injectable()
 export class PluginOperationsService {
@@ -23,7 +27,6 @@ export class PluginOperationsService {
   constructor(
     private readonly geminiService: GeminiService,
     private readonly codeCompilerService: CodeCompilerService,
-    private readonly chatStorageService: ChatStorageService,
   ) {}
 
   async createPlugin(createData: CreateRequestDto): Promise<string> {
@@ -193,32 +196,21 @@ export class PluginOperationsService {
   }
 
   async autoFixCompilationErrors(
-    session: ChatSession,
     createData: CreateRequestDto,
     attempts = 0,
-  ): Promise<string> {
+  ): Promise<FixResult> {
     const maxAttempts = 3;
+    const folderPath = path.join(process.cwd(), 'generated', createData.name);
 
     if (attempts >= maxAttempts) {
-      await this.chatStorageService.addMessage(session.id, {
-        role: 'system',
-        content: `Maximum fix attempts (${maxAttempts}) reached. Manual intervention required.`,
-        timestamp: new Date(),
-      });
-
-      return `Plugin creation completed with errors. Maximum fix attempts reached. Chat session ID: ${session.id}`;
+      this.logger.warn(
+        `Maximum fix attempts (${maxAttempts}) reached. Manual intervention required.`,
+      );
+      return {
+        success: false,
+        message: `Maximum fix attempts (${maxAttempts}) reached. Manual intervention required.`,
+      };
     }
-
-    // Add a message asking the AI to fix the errors
-    await this.chatStorageService.addMessage(session.id, {
-      role: 'user',
-      content:
-        'The compilation failed. Can you analyze the errors and fix the code?',
-      timestamp: new Date(),
-    });
-
-    // Get plugin path
-    const folderPath = path.join(process.cwd(), 'generated', createData.name);
 
     // Read compilation errors
     let errorDetails = '';
@@ -234,76 +226,67 @@ export class PluginOperationsService {
 
     // Create the AI prompt with context and error details
     const contextPrompt = `You are helping with a Minecraft plugin called '${createData.name}' that failed to compile. 
-  Please analyze the errors and suggest fixes. Here are the compilation errors:
-  ${errorDetails}`;
+    Please analyze the errors and suggest fixes. Here are the compilation errors:
+    ${errorDetails}
+    
+    Respond with code changes in JSON format like this:
+    {
+      "createdFiles": [
+        { "path": "path/to/file.java", "content": "// Java code here" }
+      ],
+      "modifiedFiles": [
+        { "path": "path/to/existing.java", "content": "// Updated Java code" }
+      ],
+      "deletedFiles": ["path/to/remove.java"]
+    }`;
 
     try {
-      // Get the AI's fix suggestions using the injected service
+      this.logger.log('Requesting AI assistance for compilation errors');
+
+      // Get the AI's fix suggestions
       const aiResponse =
         await this.geminiService.processWithGemini(contextPrompt);
-
-      // Add AI response to chat
-      await this.chatStorageService.addMessage(session.id, {
-        role: 'assistant',
-        content: aiResponse,
-        timestamp: new Date(),
-      });
 
       // Extract code fixes from AI response
       const fixActions = this.extractCodeFixes(aiResponse);
 
-      // Apply the fixes
-      await this.chatStorageService.addMessage(session.id, {
-        role: 'system',
-        content: 'Applying suggested fixes...',
-        timestamp: new Date(),
-      });
+      this.logger.log('Applying suggested fixes...');
 
       // Execute the actions
       await this.executeFileActions(fixActions, folderPath);
 
-      // Try compiling again
-      await this.chatStorageService.addMessage(session.id, {
-        role: 'system',
-        content: 'Recompiling after fixes...',
-        timestamp: new Date(),
-      });
+      this.logger.log('Recompiling after fixes...');
 
-      // Compile with Maven using the injected service
+      // Compile with Maven
       const compilationResult =
         await this.codeCompilerService.compileMavenProject(folderPath, false);
 
       if (compilationResult.success) {
-        await this.chatStorageService.addMessage(session.id, {
-          role: 'system',
-          content: `Maven build successful after fixes. Artifact: ${compilationResult.artifactPath}`,
-          timestamp: new Date(),
-        });
+        this.logger.log(
+          `Maven build successful after fixes. Artifact: ${compilationResult.artifactPath}`,
+        );
 
-        return `Plugin '${createData.name}' created and fixed successfully! Chat session ID: ${session.id}`;
+        return {
+          success: true,
+          message: `Plugin '${createData.name}' fixed successfully!`,
+          artifactPath: compilationResult.artifactPath,
+        };
       } else {
         // Record failure and try again
-        await this.chatStorageService.addMessage(session.id, {
-          role: 'system',
-          content: `Compilation still failing: ${compilationResult.error}`,
-          timestamp: new Date(),
-        });
+        this.logger.warn(
+          `Compilation still failing: ${compilationResult.error}`,
+        );
 
         // Recursive call with incremented attempts
-        return await this.autoFixCompilationErrors(
-          session,
-          createData,
-          attempts + 1,
-        );
+        return await this.autoFixCompilationErrors(createData, attempts + 1);
       }
     } catch (error) {
-      await this.chatStorageService.addMessage(session.id, {
-        role: 'system',
-        content: `Error during auto-fix process: ${error.message}`,
-        timestamp: new Date(),
-      });
+      this.logger.error(`Error during auto-fix process: ${error.message}`);
 
-      return `Error fixing plugin: ${error.message}. Chat session ID: ${session.id}`;
+      return {
+        success: false,
+        message: `Error fixing plugin: ${error.message}`,
+      };
     }
   }
 }
