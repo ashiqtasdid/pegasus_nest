@@ -383,6 +383,65 @@
         </div>
       </div>
 
+      <!-- Chat system (initially hidden) -->
+      <div id="chatSection" class="hidden mt-6">
+        <div
+          class="bg-white dark:bg-dark-800 rounded-xl shadow-lg overflow-hidden border border-slate-100 dark:border-dark-700"
+        >
+          <div
+            class="bg-gradient-to-r from-indigo-500 to-purple-500 dark:from-indigo-600 dark:to-purple-700 py-4 px-6"
+          >
+            <h3 class="text-white text-lg font-semibold">Plugin Assistant</h3>
+            <p class="text-indigo-50 text-sm mt-1">
+              Ask questions about your generated plugin
+            </p>
+          </div>
+
+          <div class="p-4">
+            <div
+              id="chatMessages"
+              class="space-y-4 mb-4 max-h-80 overflow-y-auto p-2"
+            >
+              <div
+                class="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-lg text-slate-700 dark:text-slate-300"
+              >
+                <p class="text-sm">
+                  <span class="font-semibold">Assistant:</span> Your plugin has
+                  been generated! How can I help you understand how it works?
+                </p>
+              </div>
+            </div>
+
+            <div class="flex gap-2 mt-4">
+              <input
+                type="text"
+                id="chatInput"
+                class="flex-1 rounded-lg border border-slate-300 dark:border-dark-600 bg-white dark:bg-dark-700 px-4 py-2 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-600"
+                placeholder="Ask about your plugin..."
+              />
+              <button
+                id="sendMessageBtn"
+                class="bg-indigo-500 hover:bg-indigo-600 text-white font-medium py-2 px-4 rounded-lg transition duration-200 ease-in-out"
+                onclick="sendChatMessage()"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-5 w-5"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Footer -->
       <div class="mt-12 text-center text-sm text-slate-500 dark:text-slate-400">
         <p>Minecraft Plugin Generator powered by AI</p>
@@ -480,6 +539,15 @@
         document.getElementById('generateResponse').classList.add('hidden');
         document.getElementById('downloadSection').classList.add('hidden');
         document.getElementById('processSteps').classList.add('hidden');
+        
+        // Reset and hide chat section
+        document.getElementById('chatSection').classList.add('hidden');
+        document.getElementById('chatMessages').innerHTML = `
+          <div class="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-lg text-slate-700 dark:text-slate-300">
+            <p class="text-sm"><span class="font-semibold">Assistant:</span> Your plugin has been generated! How can I help you understand how it works?</p>
+          </div>
+        `;
+        
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
 
@@ -539,6 +607,9 @@
 
         // Hide download section when starting a new generation
         downloadSection.classList.add('hidden');
+        
+        // Hide chat section when starting a new generation
+        document.getElementById('chatSection').classList.add('hidden');
 
         // Show process steps indicator
         updateProcessStep(1);
@@ -649,6 +720,9 @@
               'text-red-700',
               'dark:text-red-400',
             );
+            
+            // Show chat section when generation is successful
+            showChatSection();
           } else if (result.includes('Error:') || result.includes('failed')) {
             responseElement.classList.add(
               'border-red-200',
@@ -670,7 +744,7 @@
         } catch (error) {
           responseElement.innerHTML = `<div class="flex items-start">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-500 mr-2 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
             </svg>
             <div>
               <div class="font-medium text-red-600 dark:text-red-400">Error</div>
@@ -744,6 +818,98 @@
           downloadBtn.disabled = false;
         }
       }
+      
+      // Chat system functionality
+      function showChatSection() {
+        document.getElementById('chatSection').classList.remove('hidden');
+      }
+
+      async function sendChatMessage() {
+        const chatInput = document.getElementById('chatInput');
+        const chatMessages = document.getElementById('chatMessages');
+        const userMessage = chatInput.value.trim();
+        
+        if (!userMessage) return;
+        
+        // Add user message to chat
+        chatMessages.innerHTML += `
+          <div class="bg-slate-100 dark:bg-slate-800 p-3 rounded-lg ml-6 text-slate-700 dark:text-slate-300">
+            <p class="text-sm"><span class="font-semibold">You:</span> ${userMessage}</p>
+          </div>
+        `;
+        
+        // Clear input
+        chatInput.value = '';
+        
+        // Scroll to bottom of chat
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        
+        // Show loading indicator
+        chatMessages.innerHTML += `
+          <div id="loadingMessage" class="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-lg text-slate-700 dark:text-slate-300">
+            <p class="text-sm flex items-center">
+              <span class="font-semibold">Assistant:</span>
+              <svg class="animate-spin ml-2 mr-1 h-4 w-4 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Thinking...
+            </p>
+          </div>
+        `;
+        
+        try {
+          // Send message to server for AI response
+          const response = await fetch('/create/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              message: userMessage,
+              pluginName: currentPluginName
+            }),
+          });
+          
+          const result = await response.text();
+          
+          // Remove loading message
+          document.getElementById('loadingMessage').remove();
+          
+          // Add AI response
+          chatMessages.innerHTML += `
+            <div class="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-lg text-slate-700 dark:text-slate-300">
+              <p class="text-sm"><span class="font-semibold">Assistant:</span> ${result}</p>
+            </div>
+          `;
+        } catch (error) {
+          // Remove loading message
+          document.getElementById('loadingMessage').remove();
+          
+          // Show error message
+          chatMessages.innerHTML += `
+            <div class="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg text-red-700 dark:text-red-400">
+              <p class="text-sm"><span class="font-semibold">Error:</span> ${error.message}</p>
+            </div>
+          `;
+        }
+        
+        // Scroll to bottom of chat again
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      // Listen for Enter key in chat input
+      document.addEventListener('DOMContentLoaded', () => {
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) {
+          chatInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              sendChatMessage();
+            }
+          });
+        }
+      });
     </script>
   </body>
 </html>

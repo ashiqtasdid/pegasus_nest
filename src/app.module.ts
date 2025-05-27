@@ -7,6 +7,7 @@ import { FileCompilerService } from './services/file-compiler.service';
 import { GeminiService } from './services/gemini.service';
 import { CodeCompilerService } from './services/code-compiler.service';
 import { PluginOperationsService } from './services/plugin-operations.service';
+import { PluginChatService } from './services/plugin-chat.service';
 
 @Module({
   imports: [],
@@ -18,6 +19,7 @@ import { PluginOperationsService } from './services/plugin-operations.service';
     GeminiService,
     CodeCompilerService,
     PluginOperationsService,
+    PluginChatService,
   ],
 })
 export class AppModule {}

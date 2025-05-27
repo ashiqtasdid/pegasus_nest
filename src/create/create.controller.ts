@@ -21,6 +21,7 @@ import { GeminiService } from '../services/gemini.service';
 import { CodeCompilerService } from '../services/code-compiler.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { PluginChatService } from '../services/plugin-chat.service';
 
 // Define return type for execPromise
 interface ExecResult {
@@ -91,6 +92,7 @@ export class CreateController {
     private readonly fileCompilerService: FileCompilerService,
     private readonly geminiService: GeminiService,
     private readonly codeCompilerService: CodeCompilerService,
+    private readonly pluginChatService: PluginChatService,
   ) {}
 
   private logState(state: ProcessingState, message: string): void {
@@ -1180,5 +1182,15 @@ Ensure all necessary files for a working Minecraft plugin are included.
 
     // Return the file as a StreamableFile
     return new StreamableFile(fileStream);
+  }
+
+  @Post('chat')
+  async chatAboutPlugin(
+    @Body() chatRequest: { message: string; pluginName: string },
+  ): Promise<string> {
+    return this.pluginChatService.getChatResponse(
+      chatRequest.message,
+      chatRequest.pluginName,
+    );
   }
 }
