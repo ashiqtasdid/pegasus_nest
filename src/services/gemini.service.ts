@@ -45,10 +45,10 @@ export class GeminiService {
       this.logger.log('Sending request to OpenRouter...');
 
       // Using only deepseek/deepseek-prover-v2 model as requested
-      this.logger.log('Using model: deepseek/deepseek-prover-v2');
+      this.logger.log('Using model: anthropic/claude-sonnet-4');
 
       const response = await this.openai.chat.completions.create({
-        model: 'anthropic/claude-3.7-sonnet',
+        model: 'anthropic/claude-sonnet-4',
         messages: [
           {
             role: 'user',
