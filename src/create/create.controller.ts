@@ -110,7 +110,7 @@ export class CreateController {
     const state: ProcessingState = {
       status: 'pending',
       step: 0,
-      totalSteps: 5,
+      totalSteps: 6,
     };
 
     // Add this variable at the start of the try block
@@ -317,279 +317,95 @@ export class CreateController {
           fileDetails,
         );
 
-        const geminiResponse = await this.geminiService.processWithGemini(
-          enhancedPrompt,
-          compiledOutputPath,
-        );
+        let parsedActions: FileAction;
 
-        // STEP 5: Analyze response and take action
+        try {
+          const geminiResponse = await this.geminiService.processWithGemini(
+            enhancedPrompt,
+            compiledOutputPath,
+          );
+
+          // Save AI response for debugging
+          fs.writeFileSync(
+            path.join(folderPath, 'gemini_response.txt'),
+            geminiResponse,
+          );
+
+          // Parse AI response
+          parsedActions = this.parseAIResponse(geminiResponse);
+
+          // Validate AI created proper files
+          const hasJavaPlugin = parsedActions.createdFiles.some(
+            (f) =>
+              f.path.endsWith('.java') &&
+              f.content.includes('extends JavaPlugin'),
+          );
+          const hasPluginYml = parsedActions.createdFiles.some((f) =>
+            f.path.includes('plugin.yml'),
+          );
+
+          if (
+            !hasJavaPlugin ||
+            !hasPluginYml ||
+            parsedActions.createdFiles.length < 2
+          ) {
+            throw new Error('AI failed to create required files');
+          }
+
+          this.logState(
+            state,
+            `AI created ${parsedActions.createdFiles.length} files successfully`,
+          );
+        } catch (error) {
+          this.logState(
+            state,
+            `AI processing failed: ${error}. Using powerful fallback.`,
+          );
+          parsedActions = this.createPowerfulFallback(
+            createData.prompt,
+            folderName,
+          );
+        }
+
+        // Execute file operations
         state.step = 4;
-        this.logState(state, 'Analyzing AI response');
-
-        const responseOutputPath = path.join(folderPath, 'gemini_response.txt');
-        fs.writeFileSync(responseOutputPath, geminiResponse);
-
-        // Parse response and extract actionable items
-        const parsedActions = this.parseAIResponse(geminiResponse);
-
-        // STEP 6: Execute actions based on AI response
-        state.step = 5;
         state.status = 'completed';
-        this.logState(state, 'Executing project actions');
+        this.logState(state, 'Writing files to disk');
 
-        // Use the controller's own method instead of the service
         const actionsCount = await this.executeFileActions(
           parsedActions,
           folderPath,
         );
 
-        // STEP 6.5: Verify and fix Minecraft plugin files
-        state.step = 5.5;
-        this.logState(state, 'Verifying Minecraft plugin configuration');
+        // Compile with Maven
+        state.step = 5;
+        state.status = 'compiling';
+        this.logState(state, 'Compiling project with Maven');
 
-        // Check if this is a Minecraft plugin by looking for plugin.yml
-        const pluginYmlPath = path.join(
+        const groupId = `com.${folderName.toLowerCase()}`;
+        const artifactId = folderName.toLowerCase();
+        this.codeCompilerService.generateMinimalPom(
           folderPath,
-          'src',
-          'main',
-          'resources',
-          'plugin.yml',
+          groupId,
+          artifactId,
         );
-        const pluginYmlExists = fs.existsSync(pluginYmlPath);
 
-        // Also check for possible incorrect locations
-        const incorrectLocations = [
-          path.join(folderPath, 'plugin.yml'),
-          path.join(folderPath, 'resources', 'plugin.yml'),
-          path.join(folderPath, 'src', 'resources', 'plugin.yml'),
-        ];
+        const compilationResult =
+          await this.codeCompilerService.compileMavenProject(folderPath, false);
 
-        let foundPluginYml = false;
-        let incorrectPluginYmlPath: string | null = null;
-        for (const loc of incorrectLocations) {
-          if (fs.existsSync(loc)) {
-            foundPluginYml = true;
-            incorrectPluginYmlPath = loc;
-            break;
-          }
-        }
-
-        // If plugin.yml exists in wrong location, move it to the correct location
-        if (!pluginYmlExists && foundPluginYml && incorrectPluginYmlPath) {
+        if (compilationResult.success) {
           this.logState(
             state,
-            `Found plugin.yml in incorrect location: ${incorrectPluginYmlPath}`,
+            `Maven build successful. Artifact: ${compilationResult.artifactPath}`,
           );
-
-          // Create resources directory if it doesn't exist
-          const resourcesDir = path.join(
-            folderPath,
-            'src',
-            'main',
-            'resources',
-          );
-          if (!fs.existsSync(resourcesDir)) {
-            fs.mkdirSync(resourcesDir, { recursive: true });
-          }
-
-          // Copy file to correct location
-          fs.copyFileSync(incorrectPluginYmlPath, pluginYmlPath);
+          return `Project created successfully at ${folderPath}. AI processing complete with ${actionsCount} file operations. JAR: ${compilationResult.artifactPath}`;
+        } else {
           this.logState(
             state,
-            `Moved plugin.yml to correct location: ${pluginYmlPath}`,
+            `Maven build failed: ${compilationResult.error}`,
           );
-
-          // Flag for recompilation
-          needsRecompilation = true;
+          return `Project created but compilation failed: ${compilationResult.error}`;
         }
-
-        // Check for config.yml in the correct location
-        const configYmlPath = path.join(
-          folderPath,
-          'src',
-          'main',
-          'resources',
-          'config.yml',
-        );
-        const configYmlExists = fs.existsSync(configYmlPath);
-
-        // Check for config.yml in incorrect locations
-        const incorrectConfigLocations = [
-          path.join(folderPath, 'config.yml'),
-          path.join(folderPath, 'resources', 'config.yml'),
-          path.join(folderPath, 'src', 'resources', 'config.yml'),
-        ];
-
-        let foundConfigYml = false;
-        let incorrectConfigYmlPath: string | null = null;
-        for (const loc of incorrectConfigLocations) {
-          if (fs.existsSync(loc)) {
-            foundConfigYml = true;
-            incorrectConfigYmlPath = loc;
-            break;
-          }
-        }
-
-        // If config.yml exists in wrong location, move it to the correct location
-        if (!configYmlExists && foundConfigYml && incorrectConfigYmlPath) {
-          this.logState(
-            state,
-            `Found config.yml in incorrect location: ${incorrectConfigYmlPath}`,
-          );
-
-          // Resources directory should already exist from plugin.yml check
-          // Copy file to correct location
-          fs.copyFileSync(incorrectConfigYmlPath, configYmlPath);
-          this.logState(
-            state,
-            `Moved config.yml to correct location: ${configYmlPath}`,
-          );
-
-          // Flag for recompilation
-          needsRecompilation = true;
-        }
-
-        // Update the pom.xml to ensure resources are included
-        const pomPath = path.join(folderPath, 'pom.xml');
-        if (fs.existsSync(pomPath)) {
-          let pomContent = fs.readFileSync(pomPath, 'utf8');
-
-          // Check if resources are configured properly
-          if (
-            !pomContent.includes('<resources>') ||
-            !pomContent.includes('src/main/resources')
-          ) {
-            this.logState(state, 'Updating pom.xml to include resources');
-
-            // Add resources section if it doesn't exist
-            if (!pomContent.includes('<build>')) {
-              pomContent = pomContent.replace(
-                '</project>',
-                `
-    <build>
-      <resources>
-        <resource>
-          <directory>src/main/resources</directory>
-          <filtering>true</filtering>
-        </resource>
-      </resources>
-    </build>
-  </project>`,
-              );
-            } else if (!pomContent.includes('<resources>')) {
-              pomContent = pomContent.replace(
-                '<build>',
-                `<build>
-      <resources>
-        <resource>
-          <directory>src/main/resources</directory>
-          <filtering>true</filtering>
-        </resource>
-      </resources>`,
-              );
-            }
-
-            fs.writeFileSync(pomPath, pomContent);
-
-            // Flag for recompilation
-            needsRecompilation = true;
-          }
-        }
-
-        // STEP 7: Compile the project with Maven
-        if (actionsCount > 0 || needsRecompilation) {
-          // If we moved files, indicate we're recompiling
-          if (needsRecompilation) {
-            state.step = 6;
-            state.status = 'compiling';
-            this.logState(
-              state,
-              'Recompiling project after moving configuration files',
-            );
-          } else {
-            state.step = 6;
-            state.status = 'compiling';
-            this.logState(state, 'Compiling project with Maven');
-          }
-
-          // Generate a pom.xml file if not present
-          const groupId = `com.${folderName.toLowerCase()}`;
-          const artifactId = folderName.toLowerCase();
-          this.codeCompilerService.generateMinimalPom(
-            folderPath,
-            groupId,
-            artifactId,
-          );
-
-          // Compile with Maven (changed from true to false to disable auto-fix)
-          const compilationResult =
-            await this.codeCompilerService.compileMavenProject(
-              folderPath,
-              false,
-            );
-
-          if (compilationResult.success) {
-            this.logState(
-              state,
-              `Maven build successful. Artifact: ${compilationResult.artifactPath}`,
-            );
-
-            // Add after successful Maven compilation
-            if (compilationResult.artifactPath) {
-              // Verify JAR contents
-              this.logState(state, 'Verifying JAR contents');
-
-              try {
-                const { stdout } = await execPromise(
-                  `jar tf "${compilationResult.artifactPath}"`,
-                  { cwd: folderPath },
-                );
-
-                const hasPluginYml = stdout.includes('plugin.yml');
-                const hasConfigYml = stdout.includes('config.yml');
-
-                if (!hasPluginYml) {
-                  this.logState(
-                    state,
-                    'WARNING: plugin.yml not found in JAR file',
-                  );
-                }
-
-                if (!hasConfigYml) {
-                  this.logState(
-                    state,
-                    'WARNING: config.yml not found in JAR file',
-                  );
-                }
-
-                if (!hasPluginYml || !hasConfigYml) {
-                  // Extract more details about the JAR
-                  this.logState(state, 'JAR contents:');
-                  console.log(stdout);
-                } else {
-                  this.logState(
-                    state,
-                    'Verified plugin.yml and config.yml are properly included in JAR',
-                  );
-                }
-              } catch (error) {
-                this.logState(
-                  state,
-                  `Failed to verify JAR contents: ${error instanceof Error ? error.message : String(error)}`,
-                );
-              }
-            }
-          } else {
-            state.status = 'completed';
-            state.error = compilationResult.error;
-            this.logState(
-              state,
-              `Maven build failed: ${compilationResult.error}`,
-            );
-          }
-        }
-
-        return `Project created successfully at ${folderPath}. AI processing complete with ${actionsCount} file operations.`;
       } catch (extractError) {
         state.status = 'failed';
         state.error =
@@ -613,506 +429,319 @@ export class CreateController {
    */
   private enhancePrompt(prompt: string, fileDetails: string): string {
     return `
-You are an AI assistant that helps create Minecraft plugins. 
-I want you to create a plugin with the following description:
+You are an expert Minecraft plugin developer. You MUST create a complete, functional Minecraft plugin.
 
-${prompt}
+USER REQUEST: ${prompt}
 
-Here are the file details from the template:
-${fileDetails}
+Template context: ${fileDetails}
 
-Please provide the necessary code files for this plugin.
-Format your response as follows:
+STRICT REQUIREMENTS:
+1. ALWAYS create exactly 3 files: Main Java class, plugin.yml, config.yml
+2. Main Java class MUST extend JavaPlugin
+3. Use descriptive package names (com.pluginname)
+4. Include proper imports and error handling
+5. Add event listeners and commands as needed
+
+OUTPUT FORMAT - Return ONLY valid JSON with NO additional text:
 
 {
   "createdFiles": [
     {
-      "path": "src/main/java/com/example/MyClass.java",
-      "content": "package com.example;\n\npublic class MyClass {\n  // code here\n}"
-    }
-  ],
-  "modifiedFiles": [
+      "path": "src/main/java/com/[packagename]/[ClassName].java",
+      "content": "package com.[packagename];\n\nimport org.bukkit.plugin.java.JavaPlugin;\n// ... complete Java code"
+    },
     {
       "path": "src/main/resources/plugin.yml",
-      "content": "name: MyPlugin\nversion: 1.0\nmain: com.example.MyPlugin"
+      "content": "name: PluginName\nversion: 1.0\nmain: com.[packagename].[ClassName]\napi-version: 1.13"
+    },
+    {
+      "path": "src/main/resources/config.yml",
+      "content": "# Configuration file\nenable-features: true"
     }
   ],
-  "deletedFiles": [
-    "src/main/java/com/example/UnusedClass.java"
-  ]
+  "modifiedFiles": [],
+  "deletedFiles": []
 }
 
-Ensure all necessary files for a working Minecraft plugin are included.
-`;
+EXAMPLE STRUCTURE:
+- Package: com.greeter
+- Class: GreeterPlugin extends JavaPlugin
+- Include onEnable(), onDisable(), event handlers
+- Plugin.yml must reference correct main class
+- Config.yml with relevant settings
+
+CREATE FUNCTIONAL CODE NOW!`;
   }
 
   /**
-   * Parses the AI response to extract file actions
+   * Simplified AI response parser
    */
   private parseAIResponse(aiResponse: string): FileAction {
     try {
-      // Look for JSON in the AI response
-      const jsonMatch = aiResponse.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-      if (jsonMatch && jsonMatch[1]) {
-        return JSON.parse(jsonMatch[1]) as FileAction;
-      }
+      // Extract JSON from response
+      let jsonContent = '';
 
-      // If no JSON found, look for specific sections
-      const actions: FileAction = {
-        createdFiles: [],
-        modifiedFiles: [],
-        deletedFiles: [],
-      };
-
-      // Extract file blocks with filepath comments
-      const filePathRegex =
-        /```(?:\w+)?\s*\/\/ filepath: ([^\n]+)([\s\S]*?)```/g;
-      let match: RegExpExecArray | null;
-      while ((match = filePathRegex.exec(aiResponse)) !== null) {
-        const filePath = match[1].trim();
-        const content = match[2].trim();
-
-        actions.modifiedFiles.push({
-          path: filePath,
-          content: content,
-        });
-      }
-
-      return actions;
-    } catch (error) {
-      console.error(
-        'Failed to parse AI response:',
-        error instanceof Error ? error.message : String(error),
+      // Try code block first
+      const codeBlockMatch = aiResponse.match(
+        /```(?:json)?\s*(\{[\s\S]*?\})\s*```/,
       );
-      return {
-        createdFiles: [],
-        modifiedFiles: [],
-        deletedFiles: [],
-      };
+      if (codeBlockMatch) {
+        jsonContent = codeBlockMatch[1];
+      } else {
+        // Try standalone JSON
+        const standaloneMatch = aiResponse.match(/\{[\s\S]*\}/);
+        if (standaloneMatch) {
+          jsonContent = standaloneMatch[0];
+        }
+      }
+
+      if (jsonContent) {
+        const parsed = JSON.parse(jsonContent) as FileAction;
+
+        // Basic path fixing
+        if (parsed.createdFiles) {
+          parsed.createdFiles = parsed.createdFiles.map((file) => ({
+            ...file,
+            path: file.path.replace('src/resources/', 'src/main/resources/'),
+          }));
+        }
+
+        console.log(`AI created ${parsed.createdFiles?.length || 0} files`);
+        return parsed;
+      }
+
+      throw new Error('No valid JSON found in AI response');
+    } catch (error) {
+      console.error('Failed to parse AI response:', error);
+      throw new Error('AI response parsing failed');
     }
   }
 
   /**
-   * Extracts file fixes from a JSON string in the AI response
+   * Single powerful fallback - creates a complete functional plugin
    */
-  private extractFixesFromJson(aiResponse: string): JsonFixes | null {
-    try {
-      // More efficient regex to extract JSON - handles both wrapped and unwrapped JSON
-      const jsonRegex =
-        /(?:```(?:json)?\s*)?(\{[\s\S]*?(?:\}[\s\S]*?)*\})(?:\s*```)?/;
-      const jsonMatch = aiResponse.match(jsonRegex);
-      if (!jsonMatch) return null;
+  private createPowerfulFallback(
+    prompt: string,
+    pluginName: string,
+  ): FileAction {
+    console.log('FALLBACK ACTIVATED: Creating complete plugin from scratch');
 
-      // Extract and clean the JSON string
-      const jsonStr = jsonMatch[1].trim();
+    // Analyze prompt for plugin type
+    const lowerPrompt = prompt.toLowerCase();
+    let mainClassName = 'CustomPlugin';
+    let packageName = 'com.custom';
+    let functionality = '';
+    let configContent = '';
+    let commands = '';
 
-      // Log smaller preview to reduce console output
-      console.log(
-        'Extracted JSON string:',
-        jsonStr.length > 100
-          ? `${jsonStr.substring(0, 100)}... (${jsonStr.length} chars)`
-          : jsonStr,
-      );
-
-      // Parse and validate in one pass
-      let fixes: Record<string, unknown>;
-      try {
-        fixes = JSON.parse(jsonStr);
-      } catch {
-        // Try removing any trailing commas which can break JSON parsing
-        const fixedJson = jsonStr.replace(/,(\s*[}\]])/g, '$1');
-        fixes = JSON.parse(fixedJson);
-      }
-
-      // Validate structure with more detailed error feedback
-      if (typeof fixes !== 'object' || fixes === null) {
-        console.error('Invalid JSON structure: not an object');
-        return null;
-      }
-
-      // Use type guards for better validation
-      const isStringRecord = (obj: unknown): obj is Record<string, string> =>
-        typeof obj === 'object' &&
-        obj !== null &&
-        Object.values(obj as Record<string, unknown>).every(
-          (v) => typeof v === 'string',
-        );
-
-      const isStringArray = (arr: unknown): arr is string[] =>
-        Array.isArray(arr) && arr.every((v) => typeof v === 'string');
-
-      // Validate each section with specific error messages
-      const created = fixes.created as Record<string, string> | undefined;
-      const updated = fixes.updated as Record<string, string> | undefined;
-      const deleted = fixes.deleted as string[] | undefined;
-
-      if (created !== undefined && !isStringRecord(created)) {
-        console.error('Invalid "created" section:', created);
-        fixes.created = {};
-      }
-
-      if (updated !== undefined && !isStringRecord(updated)) {
-        console.error('Invalid "updated" section:', updated);
-        fixes.updated = {};
-      }
-
-      if (deleted !== undefined && !isStringArray(deleted)) {
-        console.error('Invalid "deleted" section:', deleted);
-        fixes.deleted = [];
-      }
-
-      return {
-        created: (fixes.created as Record<string, string>) || {},
-        updated: (fixes.updated as Record<string, string>) || {},
-        deleted: (fixes.deleted as string[]) || [],
-      };
-    } catch (error) {
-      console.error(
-        'Failed to parse JSON from AI response:',
-        error instanceof Error ? error.message : String(error),
-      );
-      return null;
+    // Smart plugin type detection
+    if (lowerPrompt.includes('greet') || lowerPrompt.includes('welcome')) {
+      mainClassName = 'GreeterPlugin';
+      packageName = 'com.greeter';
+      functionality = `
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        String message = getConfig().getString("welcome-message", "Welcome %player%!");
+        message = message.replace("%player%", player.getName());
+        player.sendMessage(ChatColor.translateAlternateColorCodes('&', message));
+    }`;
+      configContent = `# Greeter Plugin Configuration
+welcome-message: "&aWelcome %player%! &eEnjoy your stay!"
+enable-welcome: true
+broadcast-join: false`;
+    } else if (
+      lowerPrompt.includes('admin') ||
+      lowerPrompt.includes('command')
+    ) {
+      mainClassName = 'AdminPlugin';
+      packageName = 'com.admin';
+      functionality = `
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (command.getName().equalsIgnoreCase("admin")) {
+            if (sender.hasPermission("admin.use")) {
+                sender.sendMessage(ChatColor.GREEN + "Admin tools activated!");
+                return true;
+            } else {
+                sender.sendMessage(ChatColor.RED + "No permission!");
+            }
+        }
+        return false;
+    }`;
+      commands = `
+commands:
+  admin:
+    description: Main admin command
+    usage: /admin
+    permission: admin.use`;
+      configContent = `# Admin Plugin Configuration
+enable-admin-tools: true
+broadcast-admin-actions: true
+admin-prefix: "&c[ADMIN]&r"}`;
+    } else if (lowerPrompt.includes('teleport') || lowerPrompt.includes('tp')) {
+      mainClassName = 'TeleportPlugin';
+      packageName = 'com.teleport';
+      functionality = `
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (command.getName().equalsIgnoreCase("spawn") && sender instanceof Player) {
+            Player player = (Player) sender;
+            Location spawn = player.getWorld().getSpawnLocation();
+            player.teleport(spawn);
+            player.sendMessage(ChatColor.GREEN + "Teleported to spawn!");
+            return true;
+        }
+        return false;
+    }`;
+      commands = `
+commands:
+  spawn:
+    description: Teleport to spawn
+    usage: /spawn`;
+      configContent = `# Teleport Plugin Configuration
+enable-spawn-teleport: true
+teleport-delay: 3
+safe-teleport: true`;
+    } else {
+      // Generic plugin
+      configContent = `# ${mainClassName} Configuration
+plugin-enabled: true
+debug-mode: false
+feature-settings:
+  auto-save: true
+  notifications: true`;
     }
-  }
 
-  /**
-   * Enhanced code fix extraction with multiple fallback strategies
-   */
-  private extractCodeFixes(aiResponse: string): FileAction {
-    // Create result object with proper type annotations
-    const fixes: FileAction = {
-      createdFiles: [],
+    // Create complete Java class
+    const javaContent = `package ${packageName};
+
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.event.Listener;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+import org.bukkit.Location;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+
+public class ${mainClassName} extends JavaPlugin implements Listener {
+    
+    @Override
+    public void onEnable() {
+        getLogger().info("${mainClassName} v" + getDescription().getVersion() + " has been enabled!");
+        
+        // Register events
+        Bukkit.getPluginManager().registerEvents(this, this);
+        
+        // Save default config
+        saveDefaultConfig();
+        
+        // Load configuration
+        reloadConfig();
+        
+        getLogger().info("${mainClassName} loaded successfully!");
+    }
+    
+    @Override
+    public void onDisable() {
+        getLogger().info("${mainClassName} has been disabled!");
+        saveConfig();
+    }${functionality}
+    
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (command.getName().equalsIgnoreCase("${mainClassName.toLowerCase()}")) {
+            sender.sendMessage(ChatColor.GREEN + "${mainClassName} v" + getDescription().getVersion());
+            sender.sendMessage(ChatColor.YELLOW + "Status: Running");
+            return true;
+        }
+        return false;
+    }
+}`;
+
+    // Create plugin.yml
+    const pluginYmlContent = `name: ${mainClassName}
+version: 1.0
+main: ${packageName}.${mainClassName}
+api-version: 1.13
+author: PegasusNest
+description: ${prompt.substring(0, 100)}
+website: https://pegasus-nest.dev${commands}
+
+permissions:
+  ${mainClassName.toLowerCase()}.use:
+    description: Basic plugin usage
+    default: true`;
+
+    return {
+      createdFiles: [
+        {
+          path: `src/main/java/${packageName.replace(/\./g, '/')}/${mainClassName}.java`,
+          content: javaContent,
+        },
+        {
+          path: 'src/main/resources/plugin.yml',
+          content: pluginYmlContent,
+        },
+        {
+          path: 'src/main/resources/config.yml',
+          content: configContent,
+        },
+      ],
       modifiedFiles: [],
       deletedFiles: [],
     };
-
-    try {
-      // Strategy 1: Extract JSON blocks
-      const jsonRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/;
-      const jsonMatch = aiResponse.match(jsonRegex);
-
-      if (jsonMatch && jsonMatch[1]) {
-        try {
-          const parsed = JSON.parse(jsonMatch[1]) as Record<string, unknown>;
-          console.log('Successfully parsed JSON response');
-
-          // Map to our standard format
-          if (parsed.createdFiles || parsed.created) {
-            const createdFiles = parsed.createdFiles as Array<{
-              path: string;
-              content: string;
-            }>;
-            const created = parsed.created as Record<string, string>;
-
-            if (Array.isArray(createdFiles)) {
-              fixes.createdFiles = createdFiles;
-            } else if (created) {
-              fixes.createdFiles = Object.entries(created).map(
-                ([path, content]) => ({
-                  path,
-                  content,
-                }),
-              );
-            }
-          }
-
-          if (parsed.modifiedFiles || parsed.updated) {
-            const modifiedFiles = parsed.modifiedFiles as Array<{
-              path: string;
-              content: string;
-            }>;
-            const updated = parsed.updated as Record<string, string>;
-
-            if (Array.isArray(modifiedFiles)) {
-              fixes.modifiedFiles = modifiedFiles;
-            } else if (updated) {
-              fixes.modifiedFiles = Object.entries(updated).map(
-                ([path, content]) => ({
-                  path,
-                  content,
-                }),
-              );
-            }
-          }
-
-          if (parsed.deletedFiles || parsed.deleted) {
-            const deletedFiles = parsed.deletedFiles as string[];
-            const deleted = parsed.deleted as string[];
-
-            if (Array.isArray(deletedFiles)) {
-              fixes.deletedFiles = deletedFiles;
-            } else if (Array.isArray(deleted)) {
-              fixes.deletedFiles = deleted;
-            }
-          }
-
-          if (
-            fixes.createdFiles.length ||
-            fixes.modifiedFiles.length ||
-            fixes.deletedFiles.length
-          ) {
-            return fixes;
-          }
-        } catch (parseError) {
-          console.error(
-            'Failed to parse JSON in AI response:',
-            parseError instanceof Error
-              ? parseError.message
-              : String(parseError),
-          );
-        }
-      }
-
-      // Strategy 2: More aggressively search for filepath markers
-      // This improved regex captures multiple file blocks with better content extraction
-      const fileBlockRegex =
-        /```(?:\w+)?\s*(?:\/\/\s*filepath:\s*([^\n]+))([\s\S]*?)```/g;
-      let match: RegExpExecArray | null;
-      let foundAny = false;
-
-      while ((match = fileBlockRegex.exec(aiResponse)) !== null) {
-        foundAny = true;
-        const filePath = match[1]?.trim() || '';
-        let content = match[2]?.trim() || '';
-
-        if (filePath && content) {
-          // Detect if the content still has the filepath comment at the beginning
-          if (content.startsWith('// filepath:')) {
-            const contentLines = content.split('\n');
-            contentLines.shift(); // Remove the filepath line
-            content = contentLines.join('\n').trim();
-          }
-
-          fixes.modifiedFiles.push({ path: filePath, content });
-        }
-      }
-
-      if (foundAny) {
-        return fixes;
-      }
-
-      // Strategy 3: Parse Java code blocks by analyzing package and class names
-      const codeBlockRegex = /```(?:java)?\s*([\s\S]*?)```/g;
-      while ((match = codeBlockRegex.exec(aiResponse)) !== null) {
-        const content = match[1].trim();
-        if (!content) continue;
-
-        // Enhanced Java code detection with pattern matching
-        const packageMatch = content.match(/package\s+([^;]+);/);
-        const classMatch = content.match(
-          /(?:public\s+)?(?:final\s+)?class\s+(\w+)/,
-        );
-
-        if (packageMatch && classMatch) {
-          const packageName = packageMatch[1].trim();
-          const className = classMatch[1].trim();
-          const packagePath = packageName.replace(/\./g, '/');
-          const filePath = `src/main/java/${packagePath}/${className}.java`;
-
-          fixes.modifiedFiles.push({ path: filePath, content });
-          foundAny = true;
-        } else if (
-          content.includes('plugin.yml') ||
-          (content.includes('name:') &&
-            content.includes('version:') &&
-            content.includes('main:'))
-        ) {
-          // Detect plugin.yml content
-          fixes.modifiedFiles.push({
-            path: 'src/main/resources/plugin.yml',
-            content,
-          });
-          foundAny = true;
-        } else if (
-          content.includes('config.yml') ||
-          (content.includes('settings:') && !content.includes('class'))
-        ) {
-          // Detect config.yml content
-          fixes.modifiedFiles.push({
-            path: 'src/main/resources/config.yml',
-            content,
-          });
-          foundAny = true;
-        }
-      }
-
-      // Return results if we found anything
-      if (foundAny) {
-        return fixes;
-      }
-
-      console.log(
-        'No code blocks found using standard methods, trying direct error correction',
-      );
-
-      // Strategy 4: Direct error correction based on error messages
-      if (
-        aiResponse.includes('AdminCommand.java') ||
-        aiResponse.includes('illegal start of expression')
-      ) {
-        // Extract any Java code that might be a direct class fix
-        const javaCodeMatch = aiResponse.match(
-          /(?:```java)?\s*((?:package|import|public|class)[\s\S]*?(?:}\s*)+)(?:```)?/,
-        );
-        if (javaCodeMatch && javaCodeMatch[1]) {
-          const content = javaCodeMatch[1].trim();
-          const packageMatch = content.match(/package\s+([^;]+);/);
-
-          if (packageMatch) {
-            const packageName = packageMatch[1].trim();
-            const className = 'AdminCommand'; // Hardcoded based on error pattern
-            const packagePath = packageName.replace(/\./g, '/');
-            const filePath = `src/main/java/${packagePath}/${className}.java`;
-
-            fixes.modifiedFiles.push({ path: filePath, content });
-            return fixes;
-          }
-        }
-      }
-
-      // Return default structure if nothing was found
-      return fixes;
-    } catch (error) {
-      console.error(
-        'Failed to parse AI fixes:',
-        error instanceof Error ? error.message : String(error),
-      );
-      return fixes;
-    }
   }
 
   /**
-   * Optimized file operation execution with proper error handling and progress tracking
+   * Efficient file writer - writes all files in one pass
    */
   private async executeFileActions(
     actions: FileAction,
     basePath: string,
   ): Promise<number> {
     let actionsCount = 0;
-    const results = {
-      created: 0,
-      modified: 0,
-      deleted: 0,
-      failed: 0,
-    };
 
-    // Define an interface for the file operations
-    interface FileOperation {
-      type: 'create' | 'modify' | 'delete';
-      path: string;
-      content?: string;
-    }
+    console.log(`Writing ${actions.createdFiles.length} files to disk...`);
 
-    // Create operation queue with explicit type
-    const operations: FileOperation[] = [];
-
-    // Queue file creations
-    if (actions.createdFiles && Array.isArray(actions.createdFiles)) {
-      for (const file of actions.createdFiles) {
-        if (typeof file.path === 'string' && typeof file.content === 'string') {
-          operations.push({
-            type: 'create',
-            path: file.path,
-            content: file.content,
-          });
-        } else {
-          console.error('Invalid created file entry:', file);
-          results.failed++;
-        }
-      }
-    }
-
-    // Queue file modifications
-    if (actions.modifiedFiles && Array.isArray(actions.modifiedFiles)) {
-      for (const file of actions.modifiedFiles) {
-        if (typeof file.path === 'string' && typeof file.content === 'string') {
-          operations.push({
-            type: 'modify',
-            path: file.path,
-            content: file.content,
-          });
-        } else {
-          console.error('Invalid modified file entry:', file);
-          results.failed++;
-        }
-      }
-    }
-
-    // Queue file deletions
-    if (actions.deletedFiles && Array.isArray(actions.deletedFiles)) {
-      for (const filePath of actions.deletedFiles) {
-        if (typeof filePath === 'string') {
-          operations.push({
-            type: 'delete',
-            path: filePath,
-          });
-        } else {
-          console.error('Invalid deleted file entry:', filePath);
-          results.failed++;
-        }
-      }
-    }
-
-    // Process operation queue with proper error handling
-    for (const op of operations) {
+    // Process all files efficiently
+    for (const file of actions.createdFiles) {
       try {
-        const fullPath = path.join(basePath, op.path);
+        const fullPath = path.join(basePath, file.path);
         const dirPath = path.dirname(fullPath);
 
-        switch (op.type) {
-          case 'create':
-          case 'modify': {
-            // Create directory if it doesn't exist
-            if (!fs.existsSync(dirPath)) {
-              fs.mkdirSync(dirPath, { recursive: true });
-            }
-
-            // Check if file already exists (for logging purposes)
-            const fileExists = fs.existsSync(fullPath);
-
-            // Write file content (overwrite if exists)
-            if (op.content) {
-              fs.writeFileSync(fullPath, op.content);
-              actionsCount++;
-
-              if (op.type === 'create' || !fileExists) {
-                console.log(`Created file: ${op.path}`);
-                results.created++;
-              } else {
-                console.log(`Modified file: ${op.path}`);
-                results.modified++;
-              }
-            } else {
-              console.error(`Missing content for ${op.path}`);
-              results.failed++;
-            }
-            break;
-          }
-
-          case 'delete':
-            if (fs.existsSync(fullPath)) {
-              fs.unlinkSync(fullPath);
-              actionsCount++;
-              console.log(`Deleted file: ${op.path}`);
-              results.deleted++;
-            } else {
-              console.log(`Skipped deleting non-existent file: ${op.path}`);
-            }
-            break;
+        // Create directory structure
+        if (!fs.existsSync(dirPath)) {
+          fs.mkdirSync(dirPath, { recursive: true });
         }
+
+        // Write file
+        fs.writeFileSync(fullPath, file.content, 'utf8');
+        console.log(`✓ Created: ${file.path}`);
+        actionsCount++;
       } catch (error) {
-        console.error(
-          `Error ${op.type}ing file ${op.path}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        results.failed++;
+        console.error(`✗ Failed to create ${file.path}:`, error);
       }
     }
 
-    // Report detailed actions taken
-    console.log(
-      `Executed ${actionsCount} file operations: ${results.created} created, ${results.modified} modified, ${results.deleted} deleted, ${results.failed} failed.`,
-    );
+    // Handle deletions if any
+    for (const filePath of actions.deletedFiles || []) {
+      try {
+        const fullPath = path.join(basePath, filePath);
+        if (fs.existsSync(fullPath)) {
+          fs.unlinkSync(fullPath);
+          console.log(`✓ Deleted: ${filePath}`);
+          actionsCount++;
+        }
+      } catch (error) {
+        console.error(`✗ Failed to delete ${filePath}:`, error);
+      }
+    }
 
+    console.log(`File operations completed: ${actionsCount} total`);
     return actionsCount;
   }
 

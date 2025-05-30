@@ -1727,4 +1727,8 @@ public class ${className} extends JavaPlugin {
       .replace(/[-_\s.]+(.)?/g, (_, c) => (c ? c.toUpperCase() : ''))
       .replace(/^(.)/, (c) => c.toUpperCase());
   }
+
+  /**
+   * Cleans and recompiles the plugin by deleting the target folder and running Maven
+   */
 }

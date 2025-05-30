@@ -7,9 +7,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
 import { FileCompilerService } from './file-compiler.service';
+import { CodeCompilerService } from './code-compiler.service';
 import * as fs from 'fs';
 import * as path from 'path';
-import { exec } from 'child_process';
 
 interface PluginModification {
   createdFiles: Array<{ path: string; content: string }>;
@@ -24,6 +24,7 @@ export class PluginChatService {
   constructor(
     private readonly geminiService: GeminiService,
     private readonly fileCompilerService: FileCompilerService,
+    private readonly codeCompilerService: CodeCompilerService,
   ) {}
 
   async getChatResponse(message: string, pluginName: string): Promise<string> {
@@ -375,33 +376,24 @@ ${results.join('\n')}
       const targetPath = path.join(pluginFolderPath, 'target');
       if (fs.existsSync(targetPath)) {
         this.logger.log(`Deleting target folder: ${targetPath}`);
-
-        // Delete directory recursively
         fs.rmSync(targetPath, { recursive: true, force: true });
         this.logger.log('Target folder deleted successfully');
       }
 
-      // Recompile plugin using Maven
+      // Use CodeCompilerService for better error handling
       this.logger.log(`Recompiling plugin at: ${pluginFolderPath}`);
+      const result = await this.codeCompilerService.compileMavenProject(
+        pluginFolderPath,
+        false,
+      );
 
-      return new Promise((resolve, reject) => {
-        exec(
-          'mvn package',
-          { cwd: pluginFolderPath },
-          (error, stdout, stderr) => {
-            if (error) {
-              this.logger.error(`Maven compilation error: ${error.message}`);
-              this.logger.error(stderr);
-              reject(new Error(`Maven compilation failed: ${error.message}`));
-              return;
-            }
+      if (!result.success) {
+        this.logger.error(`Maven compilation failed: ${result.error}`);
+        this.logger.error(`Maven output: ${result.output}`);
+        throw new Error(`Maven compilation failed: ${result.error}`);
+      }
 
-            this.logger.log('Maven compilation successful');
-            this.logger.debug(stdout);
-            resolve();
-          },
-        );
-      });
+      this.logger.log('Maven compilation successful');
     } catch (error) {
       this.logger.error(`Error during clean and recompile: ${error.message}`);
       throw error;

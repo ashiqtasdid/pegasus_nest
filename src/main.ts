@@ -16,6 +16,6 @@ async function bootstrap() {
   console.log('Serving static files from:', publicPath);
   app.useStaticAssets(publicPath);
 
-  await app.listen(3000);
+  await app.listen(3001);
 }
 bootstrap();
