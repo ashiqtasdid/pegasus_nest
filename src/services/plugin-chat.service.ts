@@ -51,8 +51,8 @@ export class PluginChatService {
       } // Set a timeout for the entire operation to prevent hanging
       const timeoutPromise = new Promise<string>((_, reject) => {
         setTimeout(() => {
-          reject(new Error('Chat request timed out after 45 seconds'));
-        }, 45000); // Increased to 45 seconds
+          reject(new Error('Chat request timed out after 5 minutes'));
+        }, 300000); // Increased to 5 minutes
       });
 
       // Create the main processing promise

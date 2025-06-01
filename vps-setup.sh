@@ -6,11 +6,11 @@
 set -e  # Exit on any error
 
 # Configuration
-DOMAIN_NAME="yourdomain.com"  # Replace with your actual domain
+DOMAIN_NAME=""  # You'll be prompted to enter this
 API_SUBDOMAIN="api"
 UI_SUBDOMAIN="app"
-EMAIL_FOR_SSL="your-email@domain.com"  # Replace with your email for SSL certificates
-OPENROUTER_API_KEY="your_openrouter_api_key_here"  # Replace with your actual API key
+EMAIL_FOR_SSL=""  # You'll be prompted to enter this
+OPENROUTER_API_KEY=""  # You'll be prompted to enter this
 
 # Colors for output
 RED='\033[0;31m'

@@ -34,9 +34,9 @@ echo "🔍 Checking container status..."
 sleep 5
 if docker-compose ps | grep -q "Up"; then
     echo "✅ Deployment successful!"
-    echo "🌐 API is running at: http://localhost:3000"
-    echo "📊 Health check: http://localhost:3000/health"
-    echo "🎛️ Admin UI: http://localhost:3000/ui"
+    echo "🌐 API is running at: http://localhost:3001"
+    echo "📊 Health check: http://localhost:3001/health"
+    echo "🎛️ Admin UI: http://localhost:3001/ui"
 else
     echo "❌ Deployment failed!"
     echo "Container logs:"
