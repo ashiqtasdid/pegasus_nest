@@ -16,16 +16,22 @@ RUN apk add --no-cache maven
 RUN npm install -g pnpm
 
 # Copy package files
-COPY package.json ./
+COPY package.json pnpm-lock.yaml ./
 
 # Install dependencies
-RUN pnpm install
+RUN pnpm install --frozen-lockfile --only=production
 
 # Copy application source
 COPY . .
 
+# Install dev dependencies for build
+RUN pnpm install --frozen-lockfile
+
 # Build the application
 RUN pnpm run build
+
+# Remove dev dependencies to reduce image size
+RUN pnpm prune --production
 
 # Expose the port the app runs on
 EXPOSE 3000

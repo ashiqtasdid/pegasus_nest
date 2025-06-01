@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  pegasus-nest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pegasus-nest-prod
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    volumes:
+      - type: bind
+        source: ./generated
+        target: /app/generated
+      - type: bind
+        source: ./public
+        target: /app/public
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - SITE_URL=${SITE_URL:-http://localhost:3000}
+      - SITE_NAME=${SITE_NAME:-Pegasus API}
+      - AI_FIXING_ENABLED=${AI_FIXING_ENABLED:-true}
+      - AUTO_FIX_ENABLED=${AUTO_FIX_ENABLED:-true}
+      - DEBUG_AI_PROMPTS=${DEBUG_AI_PROMPTS:-false}
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - pegasus-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  nginx:
+    image: nginx:alpine
+    container_name: pegasus-nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro # For SSL certificates
+    depends_on:
+      pegasus-nest:
+        condition: service_healthy
+    networks:
+      - pegasus-network
+
+networks:
+  pegasus-network:
+    driver: bridge
+
+volumes:
+  generated_data:
+  public_data:

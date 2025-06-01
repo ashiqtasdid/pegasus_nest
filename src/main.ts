@@ -15,9 +15,8 @@ async function bootstrap() {
   const publicPath = join(process.cwd(), 'public');
   console.log('Serving static files from:', publicPath);
   app.useStaticAssets(publicPath);
-
-  // Use PORT environment variable or default to 3001
-  const port = process.env.PORT || 3001;
+  // Use PORT environment variable or default to 3000 for Docker compatibility
+  const port = process.env.PORT || 3000;
   await app.listen(port);
   console.log(`🚀 Pegasus Nest API is running on http://localhost:${port}`);
 }
