@@ -16,6 +16,9 @@ async function bootstrap() {
   console.log('Serving static files from:', publicPath);
   app.useStaticAssets(publicPath);
 
-  await app.listen(3001);
+  // Use PORT environment variable or default to 3001
+  const port = process.env.PORT || 3001;
+  await app.listen(port);
+  console.log(`🚀 Pegasus Nest API is running on http://localhost:${port}`);
 }
 bootstrap();

@@ -47,11 +47,9 @@ export class PluginOperationsService {
     const actions = this.extractCodeFixes(aiResponse);
 
     // Execute file actions
-    const actionsCount = await this.executeFileActions(actions, folderPath);
-
-    // Compile the project
+    const actionsCount = await this.executeFileActions(actions, folderPath); // Compile the project with auto-fix and AI assistance enabled
     const compilationResult =
-      await this.codeCompilerService.compileMavenProject(folderPath, false);
+      await this.codeCompilerService.compileMavenProject(folderPath);
 
     if (compilationResult.success) {
       return `Plugin ${createData.name} created and compiled successfully. Files created: ${actionsCount}`;
@@ -211,59 +209,19 @@ export class PluginOperationsService {
         message: `Maximum fix attempts (${maxAttempts}) reached. Manual intervention required.`,
       };
     }
-
-    // Read compilation errors
-    let errorDetails = '';
-    try {
-      // Look for Maven output or error logs
-      const mavenLogPath = path.join(folderPath, 'maven.log');
-      if (fs.existsSync(mavenLogPath)) {
-        errorDetails = fs.readFileSync(mavenLogPath, 'utf8');
-      }
-    } catch (error) {
-      console.error('Failed to read error logs:', error);
-    }
-
-    // Create the AI prompt with context and error details
-    const contextPrompt = `You are helping with a Minecraft plugin called '${createData.name}' that failed to compile. 
-    Please analyze the errors and suggest fixes. Here are the compilation errors:
-    ${errorDetails}
-    
-    Respond with code changes in JSON format like this:
-    {
-      "createdFiles": [
-        { "path": "path/to/file.java", "content": "// Java code here" }
-      ],
-      "modifiedFiles": [
-        { "path": "path/to/existing.java", "content": "// Updated Java code" }
-      ],
-      "deletedFiles": ["path/to/remove.java"]
-    }`;
+    this.logger.log(
+      'Attempting to fix compilation errors using integrated AI system...',
+    );
 
     try {
-      this.logger.log('Requesting AI assistance for compilation errors');
-
-      // Get the AI's fix suggestions
-      const aiResponse =
-        await this.geminiService.processWithGemini(contextPrompt);
-
-      // Extract code fixes from AI response
-      const fixActions = this.extractCodeFixes(aiResponse);
-
-      this.logger.log('Applying suggested fixes...');
-
-      // Execute the actions
-      await this.executeFileActions(fixActions, folderPath);
-
-      this.logger.log('Recompiling after fixes...');
-
-      // Compile with Maven
+      // Use the integrated AI fixing system in CodeCompilerService
+      // This includes auto-fix first, then AI-based fixing if needed
       const compilationResult =
-        await this.codeCompilerService.compileMavenProject(folderPath, false);
+        await this.codeCompilerService.compileMavenProject(folderPath);
 
       if (compilationResult.success) {
         this.logger.log(
-          `Maven build successful after fixes. Artifact: ${compilationResult.artifactPath}`,
+          `Plugin '${createData.name}' fixed and compiled successfully! Artifact: ${compilationResult.artifactPath}`,
         );
 
         return {
@@ -272,9 +230,9 @@ export class PluginOperationsService {
           artifactPath: compilationResult.artifactPath,
         };
       } else {
-        // Record failure and try again
+        // If compilation still fails after AI fixes, try again up to max attempts
         this.logger.warn(
-          `Compilation still failing: ${compilationResult.error}`,
+          `Compilation still failing after AI fixes: ${compilationResult.error}`,
         );
 
         // Recursive call with incremented attempts

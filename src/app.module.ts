@@ -2,16 +2,18 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CreateController } from './create/create.controller';
+import { HealthController } from './health/health.controller';
 import { CreateService } from './services/create.service';
 import { FileCompilerService } from './services/file-compiler.service';
 import { GeminiService } from './services/gemini.service';
 import { CodeCompilerService } from './services/code-compiler.service';
 import { PluginOperationsService } from './services/plugin-operations.service';
 import { PluginChatService } from './services/plugin-chat.service';
+import { PromptRefinementService } from './services/prompt-refinement.service';
 
 @Module({
   imports: [],
-  controllers: [AppController, CreateController],
+  controllers: [AppController, CreateController, HealthController],
   providers: [
     AppService,
     CreateService,
@@ -20,6 +22,7 @@ import { PluginChatService } from './services/plugin-chat.service';
     CodeCompilerService,
     PluginOperationsService,
     PluginChatService,
+    PromptRefinementService,
   ],
 })
 export class AppModule {}

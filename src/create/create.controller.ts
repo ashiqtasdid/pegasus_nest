@@ -19,6 +19,10 @@ import { createExtractorFromFile } from 'node-unrar-js';
 import { FileCompilerService } from '../services/file-compiler.service';
 import { GeminiService } from '../services/gemini.service';
 import { CodeCompilerService } from '../services/code-compiler.service';
+import {
+  PromptRefinementService,
+  RefinedPrompt,
+} from '../services/prompt-refinement.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { PluginChatService } from '../services/plugin-chat.service';
@@ -93,6 +97,7 @@ export class CreateController {
     private readonly geminiService: GeminiService,
     private readonly codeCompilerService: CodeCompilerService,
     private readonly pluginChatService: PluginChatService,
+    private readonly promptRefinementService: PromptRefinementService,
   ) {}
 
   private logState(state: ProcessingState, message: string): void {
@@ -140,11 +145,9 @@ export class CreateController {
 
         state.step = 6;
         state.status = 'compiling';
-        this.logState(state, 'Recompiling existing project');
-
-        // Compile with Maven (changed from true to false to disable auto-fix)
+        this.logState(state, 'Recompiling existing project'); // Compile with Maven with AI fixing enabled for better error recovery
         const compilationResult =
-          await this.codeCompilerService.compileMavenProject(folderPath, false);
+          await this.codeCompilerService.compileMavenProject(folderPath);
 
         if (compilationResult.success) {
           this.logState(
@@ -290,14 +293,30 @@ export class CreateController {
           madeProgress = cleanupDirectories();
         }
 
-        console.log(`Directory cleanup completed after ${passes} passes`);
-
-        // STEP 4: Process with AI
+        console.log(`Directory cleanup completed after ${passes} passes`); // STEP 4: Refine prompt and process with AI
         state.status = 'processing';
         state.step = 3;
-        this.logState(state, 'Processing with Gemini AI');
+        this.logState(state, 'Refining prompt and processing with AI');
 
-        // Initialize array with the proper type
+        // STEP 4a: Refine the prompt using the PromptRefinementService
+        const refinedPromptData =
+          await this.promptRefinementService.refinePrompt(
+            createData.prompt,
+            folderName,
+          );
+
+        // Save refined prompt data for debugging and reference
+        fs.writeFileSync(
+          path.join(folderPath, 'refined_prompt.json'),
+          JSON.stringify(refinedPromptData, null, 2),
+        );
+
+        this.logState(
+          state,
+          `Prompt refined - detected ${refinedPromptData.detectedFeatures.length} features, complexity: ${refinedPromptData.complexity}`,
+        );
+
+        // Initialize array with the proper type for template context
         const fileDetailsArray: FileDetails[] = [];
         for (const file of extractedFiles) {
           const filePath = path.join(folderPath, file);
@@ -310,18 +329,18 @@ export class CreateController {
           }
         }
 
-        // Add agent instructions to the prompt with file details
+        // Create final enhanced prompt combining refined prompt with template context
         const fileDetails = JSON.stringify(fileDetailsArray, null, 2);
-        const enhancedPrompt = this.enhancePrompt(
-          createData.prompt,
+        const finalPrompt = this.createFinalPrompt(
+          refinedPromptData.refinedPrompt,
           fileDetails,
+          refinedPromptData,
         );
 
         let parsedActions: FileAction;
-
         try {
           const geminiResponse = await this.geminiService.processWithGemini(
-            enhancedPrompt,
+            finalPrompt,
             compiledOutputPath,
           );
 
@@ -389,9 +408,8 @@ export class CreateController {
           groupId,
           artifactId,
         );
-
         const compilationResult =
-          await this.codeCompilerService.compileMavenProject(folderPath, false);
+          await this.codeCompilerService.compileMavenProject(folderPath);
 
         if (compilationResult.success) {
           this.logState(
@@ -471,6 +489,67 @@ EXAMPLE STRUCTURE:
 - Config.yml with relevant settings
 
 CREATE FUNCTIONAL CODE NOW!`;
+  }
+
+  /**
+   * Creates the final prompt by combining refined prompt with template context
+   */ private createFinalPrompt(
+    refinedPrompt: string,
+    fileDetails: string,
+    refinedData: RefinedPrompt,
+  ): string {
+    return `
+You are an expert Minecraft plugin developer. Create a complete, functional Minecraft plugin based on the refined specifications below.
+
+${refinedPrompt}
+
+Template context: ${fileDetails}
+
+ADDITIONAL TECHNICAL SPECIFICATIONS:
+- Package Name: ${refinedData.packageName}
+- Main Class: ${refinedData.className}
+- Plugin Name: ${refinedData.pluginName}
+- Complexity Level: ${refinedData.complexity}
+
+DETECTED FEATURES: ${refinedData.detectedFeatures.join(', ')}
+SUGGESTED COMMANDS: ${refinedData.suggestedCommands.join(', ')}
+SUGGESTED EVENTS: ${refinedData.suggestedEvents.join(', ')}
+
+STRICT REQUIREMENTS:
+1. ALWAYS create exactly 3 files: Main Java class, plugin.yml, config.yml
+2. Main Java class MUST extend JavaPlugin and be named ${refinedData.className}
+3. Use the exact package name: ${refinedData.packageName}
+4. Include proper imports and comprehensive error handling
+5. Add event listeners and commands as specified in the refined prompt
+6. Use modern Bukkit/Spigot API (1.13+) with proper version compatibility
+7. Include helpful player feedback messages and logging
+8. Add configuration options for all customizable features
+9. Implement proper permission checks for all commands
+10. Follow Java coding standards and security best practices
+
+OUTPUT FORMAT - Return ONLY valid JSON with NO additional text:
+
+{
+  "createdFiles": [
+    {
+      "path": "src/main/java/${refinedData.packageName.replace(/\./g, '/')}/${refinedData.className}.java",
+      "content": "package ${refinedData.packageName};\\n\\nimport org.bukkit.plugin.java.JavaPlugin;\\n// ... complete Java implementation"
+    },
+    {
+      "path": "src/main/resources/plugin.yml",
+      "content": "name: ${refinedData.pluginName}\\nversion: 1.0\\nmain: ${refinedData.packageName}.${refinedData.className}\\napi-version: 1.13\\n// ... complete plugin.yml with all commands and permissions"
+    },
+    {
+      "path": "src/main/resources/config.yml",
+      "content": "# ${refinedData.pluginName} Configuration\\n// ... configuration settings relevant to the plugin features"
+    }
+  ],
+  "modifiedFiles": [],
+  "deletedFiles": []
+}
+
+IMPORTANT: Implement ALL features, commands, and event handlers specified in the refined prompt. Create production-ready, well-documented code that fully satisfies the user's requirements.
+`;
   }
 
   /**
@@ -812,14 +891,44 @@ permissions:
     // Return the file as a StreamableFile
     return new StreamableFile(fileStream);
   }
-
   @Post('chat')
   async chatAboutPlugin(
     @Body() chatRequest: { message: string; pluginName: string },
   ): Promise<string> {
-    return this.pluginChatService.getChatResponse(
-      chatRequest.message,
-      chatRequest.pluginName,
-    );
+    try {
+      // Log the incoming chat request
+      console.log(
+        `[Chat] Processing message for plugin "${chatRequest.pluginName}": ${chatRequest.message}`,
+      );
+
+      // Use enhanced chat service with prompt refinement
+      const response =
+        await this.pluginChatService.getChatResponseWithRefinement(
+          chatRequest.message,
+          chatRequest.pluginName,
+        );
+
+      console.log(`[Chat] Successfully processed chat request`);
+      return response;
+    } catch (error) {
+      console.error(`[Chat] Error processing chat request: ${error.message}`);
+
+      // Return a user-friendly error message instead of letting the error bubble up
+      if (
+        error.message.includes('ECONNRESET') ||
+        error.message.includes('socket hang up')
+      ) {
+        return `I'm experiencing connection issues right now. Please try your request again in a moment.`;
+      } else if (
+        error.message.includes('timeout') ||
+        error.message.includes('ETIMEDOUT')
+      ) {
+        return `The request is taking longer than expected. Please try again with a simpler message.`;
+      } else if (error.message.includes('Rate limit')) {
+        return `I'm receiving too many requests right now. Please wait a moment and try again.`;
+      } else {
+        return `I encountered an issue while processing your request: ${error.message}. Please try rephrasing your message.`;
+      }
+    }
   }
 }

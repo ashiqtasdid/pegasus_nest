@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec, ExecException } from 'child_process';
 import { promisify } from 'util';
+import { GeminiService } from './gemini.service';
 
 // Enhanced exec exception interface
 interface EnhancedExecException extends ExecException {
@@ -120,23 +121,31 @@ export class CodeCompilerService {
     '1.20.4': '1.20.4-R0.1-SNAPSHOT',
     latest: '1.20.4-R0.1-SNAPSHOT',
   };
-
-  constructor() {
+  constructor(private readonly geminiService: GeminiService) {
     this.logger.log('CodeCompilerService initialized');
+  } /**
+   * Compile a Maven project with enhanced error handling and validation
+   * Auto-fix and AI assistance are enabled by default
+   * @param projectPath Path to the project directory
+   * @returns CompilationResult with structured compilation status and errors
+   */
+  async compileMavenProject(projectPath: string): Promise<CompilationResult> {
+    return this.compileMavenProjectInternal(projectPath, true, true);
   }
 
   /**
-   * Compile a Maven project with enhanced error handling and validation
+   * Internal method for Maven compilation with configurable auto-fix and AI options
    * @param projectPath Path to the project directory
    * @param autoFix Whether to automatically attempt to fix compilation errors
+   * @param useAI Whether to use AI for fixing when autoFix fails
    * @returns CompilationResult with structured compilation status and errors
-   */
-  async compileMavenProject(
+   */ private async compileMavenProjectInternal(
     projectPath: string,
-    autoFix: boolean = false,
+    autoFix: boolean,
+    useAI: boolean,
   ): Promise<CompilationResult> {
     this.logger.log(
-      `Compiling Maven project at: ${projectPath} (autoFix: ${autoFix})`,
+      `Compiling Maven project at: ${projectPath} (autoFix: ${autoFix}, useAI: ${useAI})`,
     );
 
     // Validate project path for security
@@ -219,18 +228,14 @@ export class CodeCompilerService {
         fs.writeFileSync(
           mavenLogPath,
           `STDOUT:\n${stdout}\n\nSTDERR:\n${stderr}`,
-        );
-
-        // Enhanced error detection
+        ); // Enhanced error detection - Check both stdout and stderr, handle undefined/null values
         const buildFailed =
-          stderr.includes('BUILD FAILURE') ||
-          stdout.includes('BUILD FAILURE') ||
-          stderr.includes('[ERROR]');
-
+          (stderr &&
+            (stderr.includes('BUILD FAILURE') || stderr.includes('[ERROR]'))) ||
+          (stdout &&
+            (stdout.includes('BUILD FAILURE') || stdout.includes('[ERROR]')));
         if (buildFailed) {
-          this.logger.warn('Maven compilation failed');
-
-          // Parse structured errors for better diagnostics
+          this.logger.warn('Maven compilation failed'); // Parse structured errors for better diagnostics
           const parsedErrors = this.parseMavenErrors(stdout, stderr);
 
           // Attempt auto-fix if enabled
@@ -242,13 +247,53 @@ export class CodeCompilerService {
               projectPath,
               parsedErrors,
             );
-
             if (fixResult.fixed) {
               // Retry compilation after fixes
               this.logger.log('Retrying compilation after applying fixes');
-              return this.compileMavenProject(projectPath, false); // Don't auto-fix again to prevent loops
+              return this.compileMavenProjectInternal(
+                projectPath,
+                false,
+                false,
+              ); // Don't auto-fix again to prevent loops
             } else {
-              this.logger.warn(`Auto-fix failed: ${fixResult.reason}`);
+              this.logger.warn(`Auto-fix failed: ${fixResult.reason}`); // Try AI-based fixing if enabled and auto-fix failed
+              if (useAI) {
+                this.logger.log('🤖 Attempting AI-based error fixing...');
+                this.logger.log(
+                  `📊 Found ${parsedErrors.length} compilation errors to analyze`,
+                );
+                try {
+                  const aiFixResult = await this.fixWithAI(
+                    projectPath,
+                    stdout,
+                    stderr,
+                    parsedErrors,
+                  );
+
+                  if (aiFixResult.fixed) {
+                    this.logger.log(
+                      '✅ AI-based fixes applied successfully, retrying compilation',
+                    );
+                    return this.compileMavenProjectInternal(
+                      projectPath,
+                      false,
+                      false,
+                    ); // Don't auto-fix or use AI again to prevent loops
+                  } else {
+                    this.logger.warn(
+                      `❌ AI-based fixing failed: ${aiFixResult.reason}`,
+                    );
+                  }
+                } catch (error) {
+                  this.logger.error(
+                    `💥 AI-based fixing encountered error: ${error.message}`,
+                  );
+                  // Log the full error stack for debugging
+                  this.logger.error(`Full error details: ${error.stack}`);
+                }
+              } else {
+                this.logger.log('⚠️ AI fixing is disabled (useAI=false)');
+              }
             }
           }
 
@@ -325,6 +370,9 @@ export class CodeCompilerService {
         };
       } catch (err) {
         // Enhanced error logging with structured error information
+        this.logger.error(
+          `🚨 ENTERED CATCH BLOCK - Maven compilation exception occurred`,
+        );
         const compileError = err as EnhancedExecException;
         this.logger.error(`Maven compilation error details:`);
         this.logger.error(`stdout: ${compileError.stdout || 'N/A'}`);
@@ -359,6 +407,78 @@ export class CodeCompilerService {
               },
             ],
           };
+        }
+
+        // Apply auto-fix and AI fixing logic in catch block as well
+        if (parsedErrors.length > 0) {
+          // Attempt auto-fix if enabled
+          if (autoFix) {
+            this.logger.log(
+              `Attempting to auto-fix ${parsedErrors.length} compilation errors in catch block`,
+            );
+            const fixResult = await this.attemptAutoFix(
+              projectPath,
+              parsedErrors,
+            );
+            if (fixResult.fixed) {
+              // Retry compilation after fixes
+              this.logger.log(
+                'Retrying compilation after applying fixes (catch block)',
+              );
+              return this.compileMavenProjectInternal(
+                projectPath,
+                false,
+                false,
+              ); // Don't auto-fix again to prevent loops
+            } else {
+              this.logger.warn(
+                `Auto-fix failed in catch block: ${fixResult.reason}`,
+              );
+
+              // Try AI-based fixing if enabled and auto-fix failed
+              if (useAI) {
+                this.logger.log(
+                  '🤖 Attempting AI-based error fixing in catch block...',
+                );
+                this.logger.log(
+                  `📊 Found ${parsedErrors.length} compilation errors to analyze in catch block`,
+                );
+                try {
+                  const aiFixResult = await this.fixWithAI(
+                    projectPath,
+                    stdout,
+                    stderr,
+                    parsedErrors,
+                  );
+
+                  if (aiFixResult.fixed) {
+                    this.logger.log(
+                      '✅ AI-based fixes applied successfully in catch block, retrying compilation',
+                    );
+                    return this.compileMavenProjectInternal(
+                      projectPath,
+                      false,
+                      false,
+                    ); // Don't auto-fix or use AI again to prevent loops
+                  } else {
+                    this.logger.warn(
+                      `❌ AI-based fixing failed in catch block: ${aiFixResult.reason}`,
+                    );
+                  }
+                } catch (error) {
+                  this.logger.error(
+                    `💥 AI-based fixing encountered error in catch block: ${error.message}`,
+                  );
+                  // Log the full error stack for debugging
+                  this.logger.error(`Full error details: ${error.stack}`);
+                }
+              } else {
+                this.logger.log(
+                  '⚠️ AI fixing is disabled (useAI=false) in catch block',
+                );
+              }
+            }
+          }
         }
 
         return {
@@ -1033,6 +1153,81 @@ description: A Minecraft plugin`;
           this.logger.log(`Created package directory: ${packageDir}`);
           fixed = true;
         }
+      }
+    } // Fix API usage issues - specifically non-cancellable events
+    if (
+      error.message.includes('cannot find symbol') &&
+      error.message.includes('setCancelled')
+    ) {
+      // Check if trying to cancel a non-cancellable event
+      if (
+        fileContent.includes('EntityDeathEvent') &&
+        fileContent.includes('setCancelled(')
+      ) {
+        this.logger.log(
+          'Detected setCancelled() usage on EntityDeathEvent - converting to EntityDamageEvent approach',
+        );
+
+        // Replace EntityDeathEvent import with EntityDamageEvent
+        if (
+          fileContent.includes(
+            'import org.bukkit.event.entity.EntityDeathEvent;',
+          )
+        ) {
+          newContent = newContent.replace(
+            'import org.bukkit.event.entity.EntityDeathEvent;',
+            'import org.bukkit.event.entity.EntityDamageEvent;',
+          );
+        }
+
+        // Convert EntityDeathEvent handler to EntityDamageEvent handler
+        newContent = newContent.replace(
+          /public\s+void\s+(\w+)\(EntityDeathEvent\s+event\)/,
+          'public void $1(EntityDamageEvent event)',
+        );
+
+        // Convert the method logic to prevent death instead of handling death
+        newContent = newContent.replace(
+          /\/\*\*[\s\S]*?Handle\s+(?:Ender\s+Dragon\s+)?(?:Entity)?(?:Death|death)\s+(?:Event|events?)[\s\S]*?\*\//,
+          '/**\n     * Handle Ender Dragon damage events to prevent death and preserve the corpse\n     * @param event The EntityDamageEvent\n     */',
+        );
+
+        // Add damage check logic before the main logic
+        const damageCheckLogic = `
+        // Check if this damage would kill the dragon
+        if (dragon.getHealth() - event.getFinalDamage() <= 0) {
+            try {
+                Location deathLocation = dragon.getLocation();
+                World world = dragon.getWorld();
+                
+                getLogger().info("Ender Dragon would die at " + formatLocation(deathLocation) + ". Preserving corpse...");
+                
+                // Cancel the damage event to prevent death
+                event.setCancelled(true);`;
+
+        // Replace the death event logic with damage prevention logic
+        newContent = newContent.replace(
+          /try\s*\{\s*getLogger\(\)\.info\("Ender Dragon killed at[\s\S]*?event\.setCancelled\(true\);/,
+          damageCheckLogic,
+        );
+
+        // Close the damage check block properly
+        newContent = newContent.replace(
+          /\}\s*catch\s*\(\s*Exception\s+e\s*\)\s*\{\s*getLogger\(\)\.log\(Level\.SEVERE,\s*"Error handling Ender Dragon (?:death|damage) event"/,
+          '            } catch (Exception e) {\n                getLogger().log(Level.SEVERE, "Error handling Ender Dragon damage event"',
+        );
+
+        // Add closing brace for the damage check
+        newContent = newContent.replace(
+          /event\.setCancelled\(false\);\s*\}\s*\}\s*$/m,
+          'event.setCancelled(false);\n            }\n        }\n    }',
+        );
+
+        fs.writeFileSync(filePath, newContent);
+        this.logger.log(
+          'Converted EntityDeathEvent to EntityDamageEvent approach',
+        );
+        fixed = true;
       }
     }
 
@@ -1731,4 +1926,347 @@ public class ${className} extends JavaPlugin {
   /**
    * Cleans and recompiles the plugin by deleting the target folder and running Maven
    */
+  /**
+   * Use AI to fix compilation errors
+   * @param projectPath Path to the project directory
+   * @param stdout Maven compilation stdout
+   * @param stderr Maven compilation stderr
+   * @param parsedErrors Structured compilation errors
+   * @returns Promise with fix result
+   */ private async fixWithAI(
+    projectPath: string,
+    stdout: string,
+    stderr: string,
+    parsedErrors: CompilationError[],
+  ): Promise<{ fixed: boolean; reason?: string }> {
+    try {
+      this.logger.log('🔧 Preparing AI context for compilation error fixing');
+
+      // Build project context
+      const projectContext = await this.buildProjectContext(projectPath);
+      this.logger.log(
+        `📁 Built project context (${projectContext.length} characters)`,
+      );
+
+      // Format errors for AI analysis
+      const errorSummary = this.formatErrorsForAI(parsedErrors, stdout, stderr);
+      this.logger.log(
+        `📋 Formatted ${parsedErrors.length} errors for AI analysis`,
+      );
+
+      // Create comprehensive prompt for AI
+      const aiPrompt = this.buildAIFixPrompt(projectContext, errorSummary);
+      this.logger.log(`📝 Created AI prompt (${aiPrompt.length} characters)`);
+
+      this.logger.log(
+        '🚀 Requesting AI assistance for compilation error fixes',
+      );
+
+      // Get AI response using the main model (not refinement service)
+      const aiResponse = await this.geminiService.processWithGemini(aiPrompt);
+      this.logger.log(
+        `📥 Received AI response (${aiResponse.length} characters)`,
+      );
+
+      // Parse AI response to extract fixes
+      const fixes = this.parseAIFixResponse(aiResponse);
+      this.logger.log('🔍 Parsing AI response for actionable fixes...');
+
+      if (
+        !fixes ||
+        (!fixes.modifiedFiles?.length && !fixes.createdFiles?.length)
+      ) {
+        this.logger.warn('⚠️ AI did not provide any actionable fixes');
+        return {
+          fixed: false,
+          reason: 'AI did not provide any actionable fixes',
+        };
+      }
+
+      this.logger.log(
+        `🛠️ Applying ${fixes.modifiedFiles?.length || 0} file modifications and ${fixes.createdFiles?.length || 0} new files`,
+      );
+
+      // Apply fixes to the project
+      const applyResult = await this.applyAIFixes(projectPath, fixes);
+
+      if (!applyResult.success) {
+        this.logger.error(`❌ Failed to apply AI fixes: ${applyResult.error}`);
+        return {
+          fixed: false,
+          reason: `Failed to apply AI fixes: ${applyResult.error}`,
+        };
+      }
+
+      this.logger.log('✅ AI fixes applied successfully');
+      return { fixed: true };
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(`💥 AI-based fixing failed: ${err.message}`);
+      this.logger.error(`Stack trace: ${err.stack}`);
+      return {
+        fixed: false,
+        reason: `AI processing error: ${err.message}`,
+      };
+    }
+  }
+
+  /**
+   * Build project context for AI analysis
+   */
+  private async buildProjectContext(projectPath: string): Promise<string> {
+    let context = `Project: ${path.basename(projectPath)}\n`;
+    context += `Location: ${projectPath}\n\n`;
+
+    // Add pom.xml content if it exists
+    const pomPath = path.join(projectPath, 'pom.xml');
+    if (fs.existsSync(pomPath)) {
+      const pomContent = fs.readFileSync(pomPath, 'utf8');
+      context += `POM.XML:\n${pomContent}\n\n`;
+    }
+
+    // Add plugin.yml content if it exists (Minecraft plugin)
+    const pluginYmlPath = path.join(
+      projectPath,
+      'src',
+      'main',
+      'resources',
+      'plugin.yml',
+    );
+    if (fs.existsSync(pluginYmlPath)) {
+      const pluginYmlContent = fs.readFileSync(pluginYmlPath, 'utf8');
+      context += `PLUGIN.YML:\n${pluginYmlContent}\n\n`;
+    }
+
+    // Add main Java files content (up to 3 files to avoid overwhelming the AI)
+    const javaFiles = this.findJavaFiles(projectPath).slice(0, 3);
+    for (const javaFile of javaFiles) {
+      try {
+        const relativePath = path.relative(projectPath, javaFile);
+        const content = fs.readFileSync(javaFile, 'utf8');
+        context += `FILE: ${relativePath}\n${content}\n\n`;
+      } catch (error) {
+        this.logger.warn(`Could not read Java file: ${javaFile}`);
+      }
+    }
+
+    return context;
+  }
+
+  /**
+   * Find Java files in the project
+   */
+  private findJavaFiles(projectPath: string): string[] {
+    const javaFiles: string[] = [];
+    const srcDir = path.join(projectPath, 'src', 'main', 'java');
+
+    if (fs.existsSync(srcDir)) {
+      this.findJavaFilesRecursive(srcDir, javaFiles);
+    }
+
+    return javaFiles;
+  }
+
+  /**
+   * Recursively find Java files
+   */
+  private findJavaFilesRecursive(dir: string, javaFiles: string[]): void {
+    try {
+      const items = fs.readdirSync(dir);
+      for (const item of items) {
+        const fullPath = path.join(dir, item);
+        const stat = fs.statSync(fullPath);
+
+        if (stat.isDirectory()) {
+          this.findJavaFilesRecursive(fullPath, javaFiles);
+        } else if (stat.isFile() && item.endsWith('.java')) {
+          javaFiles.push(fullPath);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Could not scan directory: ${dir}`);
+    }
+  }
+
+  /**
+   * Format compilation errors for AI analysis
+   */
+  private formatErrorsForAI(
+    parsedErrors: CompilationError[],
+    stdout: string,
+    stderr: string,
+  ): string {
+    let errorSummary = 'COMPILATION ERRORS:\n\n';
+
+    // Add structured errors
+    if (parsedErrors.length > 0) {
+      errorSummary += 'Structured Errors:\n';
+      parsedErrors.forEach((error, index) => {
+        errorSummary += `${index + 1}. Type: ${error.type}\n`;
+        errorSummary += `   Message: ${error.message}\n`;
+        if (error.file) errorSummary += `   File: ${error.file}\n`;
+        if (error.line) errorSummary += `   Line: ${error.line}\n`;
+        if (error.suggestion)
+          errorSummary += `   Suggestion: ${error.suggestion}\n`;
+        errorSummary += '\n';
+      });
+    }
+
+    // Add raw Maven output (truncated to avoid overwhelming the AI)
+    if (stderr && stderr.trim()) {
+      errorSummary += '\nMaven STDERR (last 2000 chars):\n';
+      errorSummary += stderr.slice(-2000) + '\n\n';
+    }
+
+    if (stdout && stdout.trim()) {
+      errorSummary += '\nMaven STDOUT (last 2000 chars):\n';
+      errorSummary += stdout.slice(-2000) + '\n\n';
+    }
+
+    return errorSummary;
+  }
+
+  /**
+   * Build AI prompt for fixing compilation errors
+   */
+  private buildAIFixPrompt(
+    projectContext: string,
+    errorSummary: string,
+  ): string {
+    return `You are an expert Java and Minecraft plugin developer. A Maven project failed to compile and needs your help to fix the compilation errors.
+
+PROJECT CONTEXT:
+${projectContext}
+
+${errorSummary}
+
+Please analyze the compilation errors and provide fixes. Focus on:
+1. Missing imports and dependencies
+2. Incorrect class/method signatures
+3. Plugin.yml configuration issues
+4. Package structure problems
+5. Maven POM.xml dependency issues
+
+Respond with a JSON object containing the fixes in this exact format:
+{
+  "analysis": "Brief explanation of the main issues found",
+  "createdFiles": [
+    {
+      "path": "relative/path/from/project/root/NewFile.java",
+      "content": "complete file content here"
+    }
+  ],
+  "modifiedFiles": [
+    {
+      "path": "relative/path/from/project/root/ExistingFile.java", 
+      "content": "complete updated file content here"
+    }
+  ],
+  "deletedFiles": ["relative/path/to/file/to/delete.java"]
+}
+
+IMPORTANT RULES:
+- Provide complete file content for modifiedFiles, not just snippets
+- Use forward slashes (/) in all file paths
+- Paths should be relative to the project root
+- Include proper package declarations and imports
+- Ensure Minecraft plugin compatibility (Bukkit/Spigot API)
+- Only suggest realistic and safe changes
+- If you cannot fix an issue, explain why in the analysis
+
+Respond ONLY with the JSON object, no additional text.`;
+  }
+
+  /**
+   * Parse AI response to extract file operations
+   */
+  private parseAIFixResponse(aiResponse: string): any {
+    try {
+      // Try to find JSON in the response
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in AI response');
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      // Validate and normalize the response structure
+      return {
+        analysis: parsed.analysis || 'No analysis provided',
+        createdFiles: parsed.createdFiles || [],
+        modifiedFiles: parsed.modifiedFiles || [],
+        deletedFiles: parsed.deletedFiles || [],
+      };
+    } catch (error) {
+      this.logger.error(`Failed to parse AI fix response: ${error.message}`);
+      throw new Error(`Invalid AI response format: ${error.message}`);
+    }
+  }
+
+  /**
+   * Apply AI-generated fixes to the project
+   */
+  private async applyAIFixes(
+    projectPath: string,
+    fixes: any,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Apply file deletions first
+      if (fixes.deletedFiles && fixes.deletedFiles.length > 0) {
+        for (const filePath of fixes.deletedFiles) {
+          const fullPath = path.join(projectPath, filePath);
+          if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+            this.logger.log(`Deleted file: ${filePath}`);
+          }
+        }
+      }
+
+      // Apply file modifications
+      if (fixes.modifiedFiles && fixes.modifiedFiles.length > 0) {
+        for (const file of fixes.modifiedFiles) {
+          const fullPath = path.join(projectPath, file.path);
+
+          // Create directory if it doesn't exist
+          const dir = path.dirname(fullPath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+
+          // Write the file content
+          fs.writeFileSync(fullPath, file.content, 'utf8');
+          this.logger.log(`Modified file: ${file.path}`);
+        }
+      }
+
+      // Apply file creations
+      if (fixes.createdFiles && fixes.createdFiles.length > 0) {
+        for (const file of fixes.createdFiles) {
+          const fullPath = path.join(projectPath, file.path);
+
+          // Create directory if it doesn't exist
+          const dir = path.dirname(fullPath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+
+          // Write the file content (don't overwrite existing files)
+          if (!fs.existsSync(fullPath)) {
+            fs.writeFileSync(fullPath, file.content, 'utf8');
+            this.logger.log(`Created file: ${file.path}`);
+          } else {
+            this.logger.warn(
+              `File already exists, skipping creation: ${file.path}`,
+            );
+          }
+        }
+      }
+
+      return { success: true };
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(`Failed to apply AI fixes: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+  }
 }

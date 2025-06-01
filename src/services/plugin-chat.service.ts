@@ -8,6 +8,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
 import { FileCompilerService } from './file-compiler.service';
 import { CodeCompilerService } from './code-compiler.service';
+import { PromptRefinementService } from './prompt-refinement.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -25,17 +26,79 @@ export class PluginChatService {
     private readonly geminiService: GeminiService,
     private readonly fileCompilerService: FileCompilerService,
     private readonly codeCompilerService: CodeCompilerService,
+    private readonly promptRefinementService: PromptRefinementService,
   ) {}
 
-  async getChatResponse(message: string, pluginName: string): Promise<string> {
-    // Get folder path for the requested plugin
-    const folderPath = path.join(process.cwd(), 'generated', pluginName);
+  /**
+   * Enhanced chat response with prompt refinement and better error handling
+   */
+  async getChatResponseWithRefinement(
+    message: string,
+    pluginName: string,
+  ): Promise<string> {
+    const startTime = Date.now();
+    this.logger.log(
+      `Starting enhanced chat processing for plugin: ${pluginName}`,
+    );
 
-    // Check if plugin directory exists
-    if (!fs.existsSync(folderPath)) {
-      return `I don't have information about a plugin named "${pluginName}". Please generate it first.`;
+    try {
+      // Get folder path for the requested plugin
+      const folderPath = path.join(process.cwd(), 'generated', pluginName);
+
+      // Check if plugin directory exists
+      if (!fs.existsSync(folderPath)) {
+        return `I don't have information about a plugin named "${pluginName}". Please generate it first.`;
+      } // Set a timeout for the entire operation to prevent hanging
+      const timeoutPromise = new Promise<string>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('Chat request timed out after 45 seconds'));
+        }, 45000); // Increased to 45 seconds
+      });
+
+      // Create the main processing promise
+      const processingPromise = this.processEnhancedChat(
+        message,
+        pluginName,
+        folderPath,
+      );
+
+      // Race between timeout and processing
+      const result = await Promise.race([processingPromise, timeoutPromise]);
+
+      const duration = Date.now() - startTime;
+      this.logger.log(`Enhanced chat processing completed in ${duration}ms`);
+
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error(
+        `Enhanced chat processing failed after ${duration}ms: ${error.message}`,
+      );
+
+      // Handle specific error types with better user messages
+      if (error.message.includes('timeout')) {
+        return `Your request is taking longer than expected. Please try a simpler modification or try again in a moment.`;
+      } else if (
+        error.message.includes('ECONNRESET') ||
+        error.message.includes('socket hang up')
+      ) {
+        return `Connection was interrupted. Please try your request again.`;
+      } else if (error.message.includes('Rate limit')) {
+        return `Too many requests right now. Please wait a moment before trying again.`;
+      } else {
+        return `I encountered an issue: ${error.message}. Please try rephrasing your request.`;
+      }
     }
+  }
 
+  /**
+   * Main processing logic for enhanced chat with refinement
+   */
+  private async processEnhancedChat(
+    message: string,
+    pluginName: string,
+    folderPath: string,
+  ): Promise<string> {
     // Path for the documentation file
     const docsPath = path.join(folderPath, 'docs');
     if (!fs.existsSync(docsPath)) {
@@ -44,68 +107,192 @@ export class PluginChatService {
 
     const docFilePath = path.join(docsPath, `${pluginName}_documentation.txt`);
 
+    // Create or update documentation file
+    await this.ensurePluginDocumentation(pluginName, folderPath, docFilePath);
+
+    // Read the documentation file with size limit
+    let pluginContext = '';
     try {
-      // Create or update documentation file
-      await this.ensurePluginDocumentation(pluginName, folderPath, docFilePath);
+      pluginContext = fs.readFileSync(docFilePath, 'utf8');
 
-      // Read the documentation file
-      let pluginContext = '';
-      try {
-        pluginContext = fs.readFileSync(docFilePath, 'utf8');
-
-        // Truncate if too large for AI context window
-        if (pluginContext.length > 100000) {
-          this.logger.warn(
-            `Plugin documentation is very large (${pluginContext.length} chars), truncating to 100K chars`,
-          );
-          pluginContext =
-            pluginContext.substring(0, 100000) +
-            '\n...(content truncated due to length)';
-        }
-      } catch (error) {
-        this.logger.error(`Error reading documentation file: ${error.message}`);
-        return `Sorry, I couldn't access the documentation for plugin "${pluginName}".`;
+      // Truncate if too large for AI context window
+      if (pluginContext.length > 80000) {
+        this.logger.warn(
+          `Plugin documentation is very large (${pluginContext.length} chars), truncating to 80K chars`,
+        );
+        pluginContext =
+          pluginContext.substring(0, 80000) +
+          '\n...(content truncated due to length)';
       }
-
-      // Create a prompt for the AI that includes context about the plugin
-      const prompt = this.createPluginModificationPrompt(
-        message,
-        pluginName,
-        pluginContext,
-      );
-
-      // Use the Gemini service to process the prompt
-      const aiResponse = await this.geminiService.processDirectPrompt(prompt);
-
-      // Parse the AI response to get file operations
-      let pluginModification: PluginModification;
-      try {
-        pluginModification = this.parseAIResponse(aiResponse);
-      } catch (error) {
-        this.logger.error(`Failed to parse AI response: ${error.message}`);
-        return `I received a response but couldn't parse it correctly. Here's the raw response:\n\n${aiResponse}`;
-      }
-
-      // Apply the file operations to the plugin directory
-      const operationsResult = await this.applyFileOperations(
-        folderPath,
-        pluginModification,
-      );
-
-      // Regenerate documentation after modifications
-      await this.ensurePluginDocumentation(
-        pluginName,
-        folderPath,
-        docFilePath,
-        true,
-      );
-
-      // Return a summary of operations performed
-      return operationsResult;
     } catch (error) {
-      this.logger.error(`Error in chat response: ${error.message}`);
-      return `Sorry, an error occurred while processing your request: ${error.message}`;
+      this.logger.error(`Error reading documentation file: ${error.message}`);
+      return `Sorry, I couldn't access the documentation for plugin "${pluginName}".`;
     }
+
+    // Step 1: Refine the user's message for better AI understanding
+    this.logger.log('Refining user message for better AI processing...');
+    let refinedMessage = message;
+
+    try {
+      // Create a focused refinement prompt for chat messages
+      const refinementResult = await this.promptRefinementService.refinePrompt(
+        `Plugin modification request: ${message}`,
+        pluginName,
+      );
+
+      if (refinementResult?.refinedPrompt) {
+        refinedMessage = refinementResult.refinedPrompt;
+        this.logger.log('Successfully refined user message');
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Prompt refinement failed, using original message: ${error.message}`,
+      );
+      // Continue with original message if refinement fails
+    }
+
+    // Step 2: Create enhanced prompt with refined message and context
+    const prompt = this.createEnhancedPluginModificationPrompt(
+      refinedMessage,
+      pluginName,
+      pluginContext,
+    );
+
+    // Step 3: Process with AI using retry logic for connection resilience
+    const aiResponse = await this.processWithRetry(prompt);
+
+    // Step 4: Parse and apply modifications
+    let pluginModification: PluginModification;
+    try {
+      pluginModification = this.parseAIResponse(aiResponse);
+    } catch (error) {
+      this.logger.error(`Failed to parse AI response: ${error.message}`);
+      return `I received a response but couldn't parse it correctly. Here's what I understood:\n\n${aiResponse.substring(0, 500)}...`;
+    }
+
+    // Step 5: Apply file operations
+    const operationsResult = await this.applyFileOperations(
+      folderPath,
+      pluginModification,
+    );
+
+    // Step 6: Regenerate documentation after modifications
+    await this.ensurePluginDocumentation(
+      pluginName,
+      folderPath,
+      docFilePath,
+      true,
+    );
+
+    return operationsResult;
+  }
+  /**
+   * Process AI request with retry logic to handle connection issues
+   */
+  private async processWithRetry(
+    prompt: string,
+    maxRetries = 3,
+  ): Promise<string> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.logger.log(`AI processing attempt ${attempt}/${maxRetries}`);
+
+        // Add exponential backoff between retries
+        if (attempt > 1) {
+          const delay = Math.pow(2, attempt - 1) * 1000; // 2s, 4s, 8s...
+          this.logger.log(`Waiting ${delay}ms before retry...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+        return await this.geminiService.processDirectPrompt(
+          prompt,
+          'deepseek/deepseek-chat',
+        );
+      } catch (error) {
+        lastError = error as Error;
+        this.logger.warn(
+          `AI processing attempt ${attempt} failed: ${error.message}`,
+        );
+
+        // Don't retry on authentication or rate limit errors
+        if (
+          error.message.includes('Authentication') ||
+          error.message.includes('Rate limit')
+        ) {
+          throw error;
+        }
+
+        // Continue to next attempt for connection errors
+        if (
+          attempt < maxRetries &&
+          (error.message.includes('ECONNRESET') ||
+            error.message.includes('socket hang up') ||
+            error.message.includes('timeout') ||
+            error.message.includes('ETIMEDOUT'))
+        ) {
+          continue;
+        }
+      }
+    }
+
+    // If we get here, all attempts failed
+    throw lastError || new Error('All retry attempts failed');
+  }
+
+  /**
+   * Creates an enhanced prompt for AI with better structure and context
+   */
+  private createEnhancedPluginModificationPrompt(
+    refinedMessage: string,
+    pluginName: string,
+    pluginContext: string,
+  ): string {
+    return `
+You are a Minecraft plugin expert helping modify an existing plugin. 
+The user is requesting changes to a plugin named "${pluginName}".
+
+RESPONSE FORMAT INSTRUCTIONS:
+You must respond with a valid JSON object containing file operations to create, modify, or delete.
+Do not include any explanatory text before or after the JSON.
+Your entire response should be parseable as JSON.
+
+The expected JSON format is:
+{
+  "createdFiles": [
+    {
+      "path": "src/main/java/com/example/MyClass.java",
+      "content": "package com.example;\\n\\npublic class MyClass {\\n  // code here\\n}"
+    }
+  ],
+  "modifiedFiles": [
+    {
+      "path": "src/main/resources/plugin.yml",
+      "content": "name: MyPlugin\\nversion: 1.0\\nmain: com.example.MyPlugin"
+    }
+  ],
+  "deletedFiles": [
+    "src/main/java/com/example/UnusedClass.java"
+  ]
+}
+
+EXISTING PLUGIN STRUCTURE AND CONTENT:
+${pluginContext}
+
+REFINED USER REQUEST:
+${refinedMessage}
+
+IMPLEMENTATION GUIDELINES:
+1. Only include files that are relevant to the request
+2. Make sure to include the full content of any new or modified files
+3. Use proper Java syntax and Bukkit/Spigot API conventions
+4. Include proper error handling and logging
+5. Follow the existing code style and structure
+6. Test for edge cases and provide user-friendly messages
+7. Optimize for performance and memory usage
+
+Remember: Only output valid JSON with no additional text. The path should be relative to the plugin's root directory.
+`;
   }
 
   /**
@@ -378,14 +565,10 @@ ${results.join('\n')}
         this.logger.log(`Deleting target folder: ${targetPath}`);
         fs.rmSync(targetPath, { recursive: true, force: true });
         this.logger.log('Target folder deleted successfully');
-      }
-
-      // Use CodeCompilerService for better error handling
+      } // Use CodeCompilerService with AI fixing enabled for better error handling
       this.logger.log(`Recompiling plugin at: ${pluginFolderPath}`);
-      const result = await this.codeCompilerService.compileMavenProject(
-        pluginFolderPath,
-        false,
-      );
+      const result =
+        await this.codeCompilerService.compileMavenProject(pluginFolderPath);
 
       if (!result.success) {
         this.logger.error(`Maven compilation failed: ${result.error}`);
