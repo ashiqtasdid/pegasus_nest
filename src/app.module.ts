@@ -5,7 +5,6 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CreateController } from './create/create.controller';
 import { HealthController } from './health/health.controller';
-import { FrontendController } from './frontend.controller';
 import { CreateService } from './services/create.service';
 import { FileCompilerService } from './services/file-compiler.service';
 import { GeminiService } from './services/gemini.service';
@@ -36,12 +35,7 @@ import { PerformanceMonitoringService } from './common/performance-monitoring.se
       ignoreErrors: false,
     }),
   ],
-  controllers: [
-    CreateController,
-    HealthController,
-    AppController,
-    FrontendController,
-  ],
+  controllers: [CreateController, HealthController, AppController],
   providers: [
     AppService,
     CreateService,

@@ -1,4 +1,4 @@
-name: Deploy to VPS
+name: Deploy Pegasus Nest API
 
 on:
   push:
@@ -28,8 +28,8 @@ jobs:
       - name: Verify pnpm installation
         run: |
           pnpm --version
-          echo "Checking lockfiles..."
-          ls -la pnpm-lock.yaml frontend/pnpm-lock.yaml || echo "Some lockfiles missing"
+          echo "Checking lockfile..."
+          ls -la pnpm-lock.yaml || echo "Lockfile missing"
 
       - name: Get pnpm store directory
         shell: bash
@@ -45,8 +45,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          echo "Installing dependencies with workspace configuration..."
-          # Check if lockfile is compatible
+          echo "Installing API dependencies..."
           if pnpm install --frozen-lockfile --dry-run; then
             echo "Using frozen lockfile..."
             pnpm install --frozen-lockfile
@@ -55,10 +54,10 @@ jobs:
             pnpm install
           fi
 
-      - name: Build all components
-        run: pnpm run build:all
+      - name: Build API
+        run: pnpm run build
 
-      - name: Run backend tests (if available)
+      - name: Run API tests (if available)
         run: pnpm run test || echo "No tests configured"
         continue-on-error: true
 
@@ -84,29 +83,17 @@ jobs:
         run: |
           ssh root@37.114.41.124 "mkdir -p /opt/pegasus-nest-temp"
 
-      - name: Create environment files on VPS first
+      - name: Create environment files on VPS
         run: |
           ssh root@37.114.41.124 << 'EOF'
           cd /opt/pegasus-nest-temp
 
-          # Create main .env file for backend
+          # Create .env file for API
           cat > .env << ENVEOF
           NODE_ENV=production
           OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
           PORT=3000
           ENVEOF
-
-          # Create frontend .env.local file with Better Auth variables
-          mkdir -p frontend
-          cat > frontend/.env.local << FRONTENDEOF
-          NODE_ENV=production
-          NEXT_PUBLIC_API_URL=http://37.114.41.124
-          MONGODB_URL=${{ secrets.MONGODB_URL }}
-          GITHUB_CLIENT_ID=${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET=${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
-          BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}
-          BETTER_AUTH_URL=http://37.114.41.124
-          FRONTENDEOF
 
           # Create necessary directories
           mkdir -p generated logs
@@ -117,9 +104,6 @@ jobs:
           rsync -avz --exclude-from='.gitignore' \
             --exclude='.git' \
             --exclude='node_modules' \
-            --exclude='frontend/node_modules' \
-            --exclude='.next' \
-            --exclude='frontend/.next' \
             --exclude='dist' \
             --exclude='build' \
             --exclude='logs' \
@@ -131,36 +115,15 @@ jobs:
           ssh root@37.114.41.124 << 'EOF'
           cd /opt/pegasus-nest-temp
 
-          # Verify environment files exist and have content
+          # Verify environment file exists and has content
           if [ ! -f .env ] || [ ! -s .env ]; then
             echo "ERROR: .env file is missing or empty"
             exit 1
           fi
 
-          if [ ! -f frontend/.env.local ] || [ ! -s frontend/.env.local ]; then
-            echo "ERROR: frontend/.env.local file is missing or empty"
-            exit 1
-          fi
-
-          echo "✅ Environment files verified"
-          echo "Backend env variables:"
-          grep -v "API_KEY" .env || echo "No API_KEY found"
-          echo "Frontend env variables:"
-          grep -v "SECRET\|CLIENT_SECRET\|MONGODB_URL" frontend/.env.local || echo "Sensitive vars present"
-          
-          # Verify GitHub OAuth configuration
-          if grep -q "GITHUB_CLIENT_ID=" frontend/.env.local && grep -q "GITHUB_CLIENT_SECRET=" frontend/.env.local; then
-            GITHUB_CLIENT_ID=$(grep "GITHUB_CLIENT_ID=" frontend/.env.local | cut -d '=' -f2)
-            GITHUB_CLIENT_SECRET=$(grep "GITHUB_CLIENT_SECRET=" frontend/.env.local | cut -d '=' -f2)
-            
-            if [ "$GITHUB_CLIENT_ID" = "placeholder" ] || [ "$GITHUB_CLIENT_SECRET" = "placeholder" ] || [ -z "$GITHUB_CLIENT_ID" ] || [ -z "$GITHUB_CLIENT_SECRET" ]; then
-              echo "⚠️ WARNING: GitHub OAuth credentials are set to placeholder values or empty"
-            else
-              echo "✅ GitHub OAuth credentials appear to be properly configured"
-            fi
-          else
-            echo "⚠️ WARNING: GitHub OAuth environment variables missing from frontend/.env.local"
-          fi
+          echo "✅ Environment file verified"
+          echo "API env variables:"
+          grep -v "API_KEY" .env || echo "API_KEY configured"
           EOF
 
       - name: Deploy application
@@ -169,15 +132,12 @@ jobs:
           cd /opt/pegasus-nest-temp
 
           # Stop existing services if running
-          if [ -f /opt/pegasus-nest/docker-compose.simple.yml ]; then
+          if [ -f /opt/pegasus-nest/docker-compose.yml ]; then
             cd /opt/pegasus-nest
-            docker-compose -f docker-compose.simple.yml down || true
+            docker-compose down || true
             
             # Clean up any orphaned containers
             docker ps -a | grep pegasus-nest-api && docker rm -f pegasus-nest-api || true
-            docker ps -a | grep pegasus-nest-frontend && docker rm -f pegasus-nest-frontend || true
-            docker ps -a | grep pegasus-ui && docker rm -f pegasus-ui || true
-            docker ps -a | grep pegasus-nginx && docker rm -f pegasus-nginx || true
             
             # Clean up networks
             docker network ls | grep pegasus-network && docker network rm pegasus-nest_pegasus-network || true
@@ -193,24 +153,22 @@ jobs:
 
           cd /opt/pegasus-nest
 
-          # Fix potential Node.js installation issues before running the deployment script
+          # Fix potential Node.js installation issues before deployment
           if [ -f /opt/pegasus-nest/fix-nodejs-conflict.sh ]; then
             echo "Running Node.js installation fix script..."
             chmod +x fix-nodejs-conflict.sh
             ./fix-nodejs-conflict.sh
-          else
-            # Make deployment script executable
-            chmod +x deploy-vps.sh
-            
-            # Deploy
-            ./deploy-vps.sh
           fi
+
+          # Make deployment script executable and deploy
+          chmod +x deploy-vps.sh
+          ./deploy-vps.sh
           EOF
 
       - name: Verify deployment
         run: |
           sleep 30
-          curl -f http://37.114.41.124/health || curl -f http://37.114.41.124 || exit 1
+          curl -f http://37.114.41.124:3000/health || exit 1
 
       - name: Cleanup on failure
         if: failure()
@@ -219,6 +177,6 @@ jobs:
           # Restore backup if deployment failed
           if [ -d /opt/pegasus-nest-backup ]; then
             cd /opt/pegasus-nest-backup
-            docker-compose -f docker-compose.simple.yml up -d || true
+            docker-compose up -d || true
           fi
           EOF
