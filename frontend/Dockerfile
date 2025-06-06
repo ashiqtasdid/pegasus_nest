@@ -20,6 +20,9 @@ RUN npm install -g pnpm
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Copy environment file if it exists
+COPY .env.local* ./
+
 # Build the application
 RUN pnpm run build
 

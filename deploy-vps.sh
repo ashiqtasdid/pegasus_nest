@@ -11,6 +11,21 @@ docker-compose -f docker-compose.simple.yml down 2>/dev/null || true
 echo "Cleaning up old images..."
 docker system prune -f
 
+# Install pnpm if not available
+if ! command -v pnpm &> /dev/null; then
+    echo "Installing pnpm..."
+    npm install -g pnpm
+fi
+
+# Install dependencies
+echo "Installing dependencies..."
+pnpm install --frozen-lockfile || pnpm install
+
+# Build all components with environment variables
+echo "Building applications with production environment..."
+export NODE_ENV=production
+pnpm run build:all
+
 # Pull latest images if needed
 echo "Pulling base images..."
 docker pull node:20-alpine

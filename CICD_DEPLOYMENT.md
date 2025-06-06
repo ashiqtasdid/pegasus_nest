@@ -20,7 +20,9 @@ Go to your GitHub repository → Settings → Secrets and variables → Actions,
 - **`OAUTH_GITHUB_CLIENT_SECRET`**: GitHub OAuth application client secret
 - **`BETTER_AUTH_SECRET`**: JWT signing secret (32+ characters)
 
-📋 **For detailed setup instructions, see [BETTER_AUTH_SETUP.md](./BETTER_AUTH_SETUP.md)**
+> ⚠️ **Important**: GitHub doesn't allow repository secrets starting with `GITHUB_` (reserved prefix). We use `OAUTH_` prefix for GitHub OAuth secrets, and our workflow maps these to the correct environment variables.
+
+📋 **For detailed setup instructions, see [BETTER_AUTH_SETUP.md](./BETTER_AUTH_SETUP.md) and [GITHUB_SECRETS_REFERENCE.md](./GITHUB_SECRETS_REFERENCE.md)**
 
 ### 2. Generate SSH Key for GitHub Actions
 

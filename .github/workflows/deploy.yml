@@ -55,11 +55,8 @@ jobs:
             pnpm install
           fi
 
-      - name: Build backend
-        run: pnpm run build
-
-      - name: Build frontend
-        run: pnpm --filter frontend run build
+      - name: Build all components
+        run: pnpm run build:all
 
       - name: Run backend tests (if available)
         run: pnpm run test || echo "No tests configured"
