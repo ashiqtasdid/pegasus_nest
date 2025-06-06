@@ -6,6 +6,10 @@ echo "🚀 Starting Pegasus Nest API deployment on VPS..."
 # Exit on any error
 set -e
 
+# Disable Docker BuildKit to avoid buildx issues
+export DOCKER_BUILDKIT=0
+export COMPOSE_DOCKER_CLI_BUILD=0
+
 # Initialize variables
 COMPOSE_FILE=""
 
@@ -59,13 +63,24 @@ else
     PNPM_VERSION=$(pnpm --version | cut -d'.' -f1)
     if [ "$PNPM_VERSION" -gt 8 ]; then
         log "Downgrading pnpm to compatible version..."
-        npm install -g pnpm@8.15.8
+        npm uninstall -g pnpm 2>/dev/null || true
+        npm install -g pnpm@8.15.8 --force
+        npm cache clean --force 2>/dev/null || true
     fi
 fi
 
-# Verify versions
+# Verify versions and force correct pnpm if needed
 log "Node.js version: $(node --version)"
 log "pnpm version: $(pnpm --version)"
+
+# Double-check pnpm version and force install if still wrong
+CURRENT_PNPM=$(pnpm --version)
+if [[ ! "$CURRENT_PNPM" =~ ^8\. ]]; then
+    log "WARNING: pnpm version $CURRENT_PNPM is not 8.x.x - forcing correct version"
+    npm uninstall -g pnpm 2>/dev/null || true
+    npm install -g pnpm@8.15.8 --force
+    log "Final pnpm version: $(pnpm --version)"
+fi
 
 # Check if environment file exists
 if [ ! -f .env ]; then
@@ -93,7 +108,6 @@ docker pull node:20-alpine
 
 # Build and start services
 log "Building and starting API service..."
-export DOCKER_BUILDKIT=0
 
 # Clean up any existing containers to avoid conflicts
 log "Cleaning up existing containers..."
