@@ -18,6 +18,7 @@ import { SecurityService } from './common/security.service';
 import { HealthMonitoringService } from './common/health-monitoring.service';
 import { LoggingService } from './common/logging.service';
 import { PerformanceMonitoringService } from './common/performance-monitoring.service';
+import { ChatClassificationService } from './services/chat-classification.service';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { PerformanceMonitoringService } from './common/performance-monitoring.se
     HealthMonitoringService,
     LoggingService,
     PerformanceMonitoringService,
+    ChatClassificationService,
   ],
 })
 export class AppModule {}

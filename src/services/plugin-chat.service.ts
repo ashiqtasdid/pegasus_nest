@@ -9,6 +9,10 @@ import { GeminiService } from './gemini.service';
 import { FileCompilerService } from './file-compiler.service';
 import { CodeCompilerService } from './code-compiler.service';
 import { PromptRefinementService } from './prompt-refinement.service';
+import {
+  ChatClassificationService,
+  ChatIntentType,
+} from './chat-classification.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -27,36 +31,79 @@ export class PluginChatService {
     private readonly fileCompilerService: FileCompilerService,
     private readonly codeCompilerService: CodeCompilerService,
     private readonly promptRefinementService: PromptRefinementService,
+    private readonly chatClassificationService: ChatClassificationService,
   ) {}
   /**
-   * Enhanced chat response with prompt refinement and better error handling
-   * Currently under construction - returning maintenance message
+   * Enhanced chat response with intelligent classification and routing
+   * Uses DeepSeek free model to classify user intent and routes accordingly
    */
   async getChatResponseWithRefinement(
     message: string,
     pluginName: string,
   ): Promise<string> {
     this.logger.log(
-      `Chat system under construction - request for plugin: ${pluginName}`,
+      `Processing chat request for plugin: ${pluginName}, message: "${message.substring(0, 100)}..."`,
     );
 
-    // Return under construction message
-    return `🚧 **Chat System Under Construction** 🚧
+    try {
+      // Check if plugin exists
+      const folderPath = path.join(process.cwd(), 'generated', pluginName);
+      if (!fs.existsSync(folderPath)) {
+        return `❌ **Plugin Not Found**
 
-The chat system is currently being reworked and improved. This feature is temporarily unavailable while we enhance the user experience and add new capabilities.
+The plugin "${pluginName}" doesn't exist in the system. Please ensure:
 
-**What's Coming:**
-• Enhanced AI conversation capabilities
-• Better plugin understanding and analysis
-• Improved response accuracy and speed
-• New interactive features
+1. The plugin name is spelled correctly
+2. The plugin has been generated previously
+3. You're using the exact plugin name from the system
 
-**Current Status:** Under Development
-**Expected Return:** Soon™
+**Available actions:**
+• Generate a new plugin with this name
+• Check the list of existing plugins
+• Verify the plugin name spelling`;
+      }
 
-Thank you for your patience! In the meantime, you can still generate new plugins using the main plugin creation form above.
+      // Step 1: Classify the user's intent using AI
+      this.logger.log('Classifying user intent...');
+      const classification =
+        await this.chatClassificationService.classifyUserIntent(
+          message,
+          pluginName,
+        );
 
-If you need help with "${pluginName}", you can try regenerating it with more detailed instructions in the description field.`;
+      this.logger.log(
+        `Classification result: ${classification.intent} (confidence: ${classification.confidence})`,
+      );
+
+      // Step 2: Route based on classification
+      if (classification.intent === 'modification') {
+        return await this.handleModificationRequest(
+          message,
+          pluginName,
+          folderPath,
+          classification,
+        );
+      } else {
+        return await this.handleInfoRequest(
+          message,
+          pluginName,
+          folderPath,
+          classification,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Chat processing failed: ${error.message}`);
+      return `❌ **Error Processing Request**
+
+I encountered an error while processing your request: ${error.message}
+
+**Please try:**
+• Rephrasing your request
+• Being more specific about what you want
+• Checking if the plugin name exists
+
+If the problem persists, please try regenerating the plugin or contact support.`;
+    }
   }
 
   /**
@@ -212,7 +259,7 @@ If you need help with "${pluginName}", you can try regenerating it with more det
         }
         return await this.geminiService.processDirectPrompt(
           prompt,
-          'deepseek/deepseek-chat',
+          'anthropic/claude-sonnet-4',
         );
       } catch (error) {
         lastError = error as Error;
@@ -828,5 +875,169 @@ ${results.join('\n')}
     response += '• "What permissions does this plugin use?"\n';
 
     return response;
+  }
+
+  /**
+   * Handles modification requests - uses existing modification system
+   */
+  private async handleModificationRequest(
+    message: string,
+    pluginName: string,
+    folderPath: string,
+    classification: any,
+  ): Promise<string> {
+    this.logger.log(`Handling modification request for plugin: ${pluginName}`);
+
+    try {
+      // Use the existing modification system
+      return await this.processEnhancedChat(message, pluginName, folderPath);
+    } catch (error) {
+      this.logger.error(`Modification request failed: ${error.message}`);
+
+      return `❌ **Modification Failed**
+
+I encountered an error while trying to modify your plugin "${pluginName}":
+
+**Error:** ${error.message}
+
+**What you can try:**
+• Rephrase your modification request more clearly
+• Be specific about what files or features you want to change
+• Make sure your request is technically feasible for a Minecraft plugin
+• Try breaking complex changes into smaller, specific requests
+
+**Example modification requests:**
+• "Add a /heal command that restores player health"
+• "Change the welcome message color to blue"
+• "Add a cooldown of 30 seconds to the teleport command"
+• "Create a config option to disable the death messages"`;
+    }
+  }
+
+  /**
+   * Handles informational requests - provides helpful information about the plugin
+   */
+  private async handleInfoRequest(
+    message: string,
+    pluginName: string,
+    folderPath: string,
+    classification: any,
+  ): Promise<string> {
+    this.logger.log(`Handling info request for plugin: ${pluginName}`);
+
+    try {
+      // Generate or read plugin documentation
+      const docsPath = path.join(folderPath, 'docs');
+      if (!fs.existsSync(docsPath)) {
+        fs.mkdirSync(docsPath, { recursive: true });
+      }
+
+      const docFilePath = path.join(
+        docsPath,
+        `${pluginName}_documentation.txt`,
+      );
+
+      // Ensure documentation exists
+      await this.ensurePluginDocumentation(pluginName, folderPath, docFilePath);
+
+      // Read plugin context
+      let pluginContext = '';
+      try {
+        pluginContext = fs.readFileSync(docFilePath, 'utf8');
+
+        // Truncate if too large
+        if (pluginContext.length > 50000) {
+          pluginContext =
+            pluginContext.substring(0, 50000) + '\n...(truncated)';
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Could not read plugin documentation: ${error.message}`,
+        );
+        pluginContext = `Plugin: ${pluginName}\nLocation: ${folderPath}`;
+      }
+
+      // Use AI to provide intelligent response to the specific question
+      const infoPrompt = this.createInfoResponsePrompt(
+        message,
+        pluginName,
+        pluginContext,
+      );
+
+      const aiResponse = await this.geminiService.processDirectPrompt(
+        infoPrompt,
+        'deepseek/deepseek-prover-v2:free',
+      );
+
+      return (
+        aiResponse ||
+        this.createInformationalResponse(pluginName, pluginContext, message)
+      );
+    } catch (error) {
+      this.logger.error(`Info request failed: ${error.message}`);
+
+      // Fallback to basic informational response
+      try {
+        const basicContext = `Plugin: ${pluginName}`;
+        return this.createInformationalResponse(
+          pluginName,
+          basicContext,
+          message,
+        );
+      } catch (fallbackError) {
+        return `❌ **Information Request Failed**
+
+I couldn't retrieve information about the plugin "${pluginName}".
+
+**Possible reasons:**
+• Plugin files may be corrupted or missing
+• Documentation generation failed
+• System is experiencing temporary issues
+
+**What you can try:**
+• Regenerate the plugin to ensure all files are properly created
+• Ask a more specific question about the plugin
+• Check if the plugin name is correct
+
+**Example information requests:**
+• "What commands does this plugin have?"
+• "How do I configure this plugin?"
+• "What permissions does this plugin use?"
+• "How do I install this plugin?"`;
+      }
+    }
+  }
+
+  /**
+   * Creates a prompt for AI to respond to informational queries
+   */
+  private createInfoResponsePrompt(
+    message: string,
+    pluginName: string,
+    pluginContext: string,
+  ): string {
+    return `
+You are a helpful assistant for Minecraft plugin users. The user is asking about a plugin called "${pluginName}".
+
+USER QUESTION: "${message}"
+
+PLUGIN INFORMATION:
+${pluginContext}
+
+INSTRUCTIONS:
+1. Answer the user's question directly and helpfully
+2. Use the plugin information provided to give accurate details
+3. Format your response in markdown for readability
+4. Include specific examples when relevant
+5. If the question can't be answered from the plugin info, say so clearly
+6. Focus on practical, actionable information
+
+RESPONSE STYLE:
+- Be friendly and conversational
+- Use clear headings and bullet points
+- Include code examples if relevant
+- Suggest next steps when appropriate
+
+Please provide a helpful response to the user's question about "${pluginName}".`;
   }
 }
