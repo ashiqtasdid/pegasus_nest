@@ -25,11 +25,13 @@ COPY . .
 # Build the application
 RUN pnpm run build
 
-# Create directories for generated plugins and logs
+# Create directories for generated plugins and logs with proper permissions
 RUN mkdir -p /app/generated /app/logs
 
-# Change ownership to node user for security
-RUN chown -R node:node /app
+# Change ownership to node user for security and ensure proper permissions
+RUN chown -R node:node /app && \
+    chmod -R 755 /app/generated /app/logs
+
 USER node
 
 # Expose the port the app runs on

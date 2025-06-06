@@ -11,8 +11,8 @@ services:
     networks:
       - pegasus-network
     volumes:
-      - ./generated:/app/generated
-      - ./logs:/app/logs
+      - ./generated:/app/generated:rw
+      - ./logs:/app/logs:rw
     environment:
       - NODE_ENV=production
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
