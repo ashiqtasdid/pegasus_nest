@@ -48,7 +48,27 @@ export class PluginChatService {
     try {
       // Check if plugin exists
       const folderPath = path.join(process.cwd(), 'generated', pluginName);
+      this.logger.log(`Checking for plugin at path: ${folderPath}`);
+      
       if (!fs.existsSync(folderPath)) {
+        this.logger.warn(`Plugin "${pluginName}" not found at path: ${folderPath}`);
+        
+        // List available plugins for debugging
+        const generatedPath = path.join(process.cwd(), 'generated');
+        let availablePlugins = [];
+        try {
+          if (fs.existsSync(generatedPath)) {
+            availablePlugins = fs.readdirSync(generatedPath).filter(item => {
+              const itemPath = path.join(generatedPath, item);
+              return fs.statSync(itemPath).isDirectory();
+            });
+          }
+        } catch (error) {
+          this.logger.error(`Error listing available plugins: ${error.message}`);
+        }
+        
+        this.logger.log(`Available plugins: ${availablePlugins.join(', ') || 'None'}`);
+        
         return `❌ **Plugin Not Found**
 
 The plugin "${pluginName}" doesn't exist in the system. Please ensure:
@@ -57,11 +77,15 @@ The plugin "${pluginName}" doesn't exist in the system. Please ensure:
 2. The plugin has been generated previously
 3. You're using the exact plugin name from the system
 
+**Available plugins:** ${availablePlugins.length > 0 ? availablePlugins.join(', ') : 'None found'}
+
 **Available actions:**
 • Generate a new plugin with this name
 • Check the list of existing plugins
 • Verify the plugin name spelling`;
       }
+      
+      this.logger.log(`Plugin "${pluginName}" found at path: ${folderPath}`);
 
       // Step 1: Classify the user's intent using AI
       this.logger.log('Classifying user intent...');
