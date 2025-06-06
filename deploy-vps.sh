@@ -20,6 +20,17 @@ command_exists() {
 log "Stopping existing containers..."
 docker-compose -f docker-compose.simple.yml down 2>/dev/null || true
 
+# Clean up any orphaned containers with the same name
+log "Cleaning up any orphaned containers..."
+docker ps -a | grep pegasus-nest-api && docker rm -f pegasus-nest-api || true
+docker ps -a | grep pegasus-ui && docker rm -f pegasus-ui || true
+docker ps -a | grep pegasus-nginx && docker rm -f pegasus-nginx || true
+
+# Ensure Docker networks are clean
+log "Cleaning up Docker networks..."
+docker network ls | grep pegasus-network && docker network rm pegasus-nest_pegasus-network || true
+docker network prune -f
+
 # Remove old images to save space
 log "Cleaning up old images..."
 docker system prune -f --volumes

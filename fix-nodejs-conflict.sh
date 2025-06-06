@@ -17,6 +17,12 @@ log "1. Stopping existing containers"
 cd /opt/pegasus-nest
 docker-compose -f docker-compose.simple.yml down || true
 
+# Clean up any orphaned containers with the same name
+log "1a. Cleaning up any orphaned containers"
+docker ps -a | grep pegasus-nest-api && docker rm -f pegasus-nest-api || true
+docker ps -a | grep pegasus-ui && docker rm -f pegasus-ui || true
+docker ps -a | grep pegasus-nginx && docker rm -f pegasus-nginx || true
+
 # Remove existing Node.js installation
 log "2. Removing conflicting packages"
 apt-get remove -y libnode-dev || true
@@ -42,6 +48,14 @@ pnpm -v
 # Start containers
 log "6. Starting containers"
 cd /opt/pegasus-nest
+
+# Ensure clean networks
+log "6a. Cleaning up Docker networks"
+docker network ls | grep pegasus-network && docker network rm pegasus-nest_pegasus-network || true
+docker network prune -f
+
+# Start services
+log "6b. Starting services"
 docker-compose -f docker-compose.simple.yml up -d
 
 log "7. Checking container status"
