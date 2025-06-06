@@ -11,6 +11,8 @@ import * as path from 'path';
 import { exec, ExecException } from 'child_process';
 import { promisify } from 'util';
 import { GeminiService } from './gemini.service';
+import { RobustnessService } from '../common/robustness.service';
+import { ValidationService } from '../common/validation.service';
 
 // Enhanced exec exception interface
 interface EnhancedExecException extends ExecException {
@@ -47,14 +49,15 @@ interface CompilationError {
   line?: number;
   column?: number;
   message: string;
-  code?: string;
   suggestion?: string;
 }
 
+// Structured warning interface for better error handling
 interface CompilationWarning {
-  type: 'deprecation' | 'unused' | 'performance' | 'plugin-specific' | 'other';
+  type?: string;
   file?: string;
   line?: number;
+  column?: number;
   message: string;
   suggestion?: string;
 }
@@ -104,6 +107,19 @@ interface PomConfig {
 @Injectable()
 export class CodeCompilerService {
   private readonly logger = new Logger(CodeCompilerService.name);
+
+  // Health monitoring properties
+  private serviceHealth = {
+    isHealthy: true,
+    lastHealthCheck: Date.now(),
+    successfulCompilations: 0,
+    failedCompilations: 0,
+    totalCompilations: 0,
+    errorRate: 0,
+    averageCompilationTimeMs: 0,
+    lastCompilationTimes: [] as number[],
+  };
+
   // Cache for dependency resolution to improve performance
   private dependencyCache = new Map<
     string,
@@ -121,8 +137,12 @@ export class CodeCompilerService {
     '1.20.4': '1.20.4-R0.1-SNAPSHOT',
     latest: '1.20.4-R0.1-SNAPSHOT',
   };
-  constructor(private readonly geminiService: GeminiService) {
-    this.logger.log('CodeCompilerService initialized');
+  constructor(
+    private readonly geminiService: GeminiService,
+    private readonly robustnessService: RobustnessService,
+    private readonly validationService: ValidationService,
+  ) {
+    this.logger.log('CodeCompilerService initialized with robustness features');
   } /**
    * Compile a Maven project with enhanced error handling and validation
    * Auto-fix and AI assistance are enabled by default
@@ -130,7 +150,103 @@ export class CodeCompilerService {
    * @returns CompilationResult with structured compilation status and errors
    */
   async compileMavenProject(projectPath: string): Promise<CompilationResult> {
-    return this.compileMavenProjectInternal(projectPath, true, true);
+    const circuitBreakerName = 'maven_compilation';
+
+    try {
+      // Execute with circuit breaker protection
+      return await this.robustnessService.executeWithCircuitBreaker(
+        circuitBreakerName,
+        async () => {
+          // Input validation
+          const validation = await this.validateCompilationInput(projectPath);
+          if (!validation.isValid) {
+            const errorMsg = `Invalid compilation input: ${validation.errors?.join(', ')}`;
+            this.robustnessService.recordError(
+              'compilation_validation',
+              new Error(errorMsg),
+            );
+            return {
+              success: false,
+              output: '',
+              error: errorMsg,
+              errors: [{ type: 'unknown', message: errorMsg }],
+            };
+          }
+
+          // Proceed with internal compilation
+          return this.compileMavenProjectInternal(
+            validation.sanitizedData!.projectPath,
+            true,
+            true,
+          );
+        },
+        // Fallback when circuit breaker is open
+        async () => {
+          return {
+            success: false,
+            output: '',
+            error:
+              'Maven compilation service is currently unavailable due to high failure rate',
+            errors: [
+              {
+                type: 'unknown',
+                message: 'Service temporarily unavailable',
+              },
+            ],
+          };
+        },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Critical error in maven compilation: ${error.message}`,
+        error.stack,
+      );
+      this.robustnessService.recordError('compilation_critical', error);
+      return {
+        success: false,
+        output: '',
+        error: `Critical compilation error: ${error.message}`,
+        errors: [{ type: 'unknown', message: error.message }],
+      };
+    }
+  }
+
+  /**
+   * Validate compilation input parameters
+   */
+  private async validateCompilationInput(projectPath: string): Promise<{
+    isValid: boolean;
+    errors?: string[];
+    sanitizedData?: {
+      projectPath: string;
+    };
+  }> {
+    try {
+      const errors: string[] = [];
+
+      // Validate project path
+      if (!projectPath || typeof projectPath !== 'string') {
+        errors.push('Project path is required and must be a string');
+      } else if (!path.isAbsolute(projectPath)) {
+        errors.push('Project path must be absolute');
+      } else if (!this.isValidProjectPath(projectPath)) {
+        errors.push('Invalid project path or project structure');
+      }
+
+      return {
+        isValid: errors.length === 0,
+        errors,
+        sanitizedData: {
+          projectPath: path.normalize(projectPath),
+        },
+      };
+    } catch (error) {
+      this.robustnessService.recordError('compilation_validation_error', error);
+      return {
+        isValid: false,
+        errors: ['Validation service error'],
+      };
+    }
   }
 
   /**
@@ -144,16 +260,22 @@ export class CodeCompilerService {
     autoFix: boolean,
     useAI: boolean,
   ): Promise<CompilationResult> {
+    const startTime = Date.now();
     this.logger.log(
       `Compiling Maven project at: ${projectPath} (autoFix: ${autoFix}, useAI: ${useAI})`,
     );
 
     // Validate project path for security
     if (!this.isValidProjectPath(projectPath)) {
+      const error = 'Security constraint: Invalid project path';
+      this.robustnessService.recordError(
+        'compilation_security',
+        new Error(error),
+      );
       return {
         success: false,
         output: 'Invalid project path specified.',
-        error: 'Security constraint: Invalid project path',
+        error,
       };
     }
 
@@ -346,7 +468,7 @@ export class CodeCompilerService {
                 };
               }
             }
-
+            this.robustnessService.recordSuccess('maven_compilation');
             return {
               success: true,
               output: `Maven build successful: ${stdout}`,
@@ -490,6 +612,7 @@ export class CodeCompilerService {
       }
     } catch (error) {
       const err = error as Error;
+      this.robustnessService.recordError('maven_compilation', err);
       this.logger.error(`Maven compilation failed: ${err.message}`);
       return {
         success: false,
@@ -2268,5 +2391,68 @@ Respond ONLY with the JSON object, no additional text.`;
       this.logger.error(`Failed to apply AI fixes: ${err.message}`);
       return { success: false, error: err.message };
     }
+  }
+
+  /**
+   * Get the health status of the CodeCompilerService
+   * @returns Health status object with metrics
+   */
+  async getHealthStatus(): Promise<{
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    lastChecked: Date;
+    metrics: {
+      totalCompilations: number;
+      successRate: number;
+      averageCompilationTimeMs: number;
+    };
+  }> {
+    // Update last health check time
+    this.serviceHealth.lastHealthCheck = Date.now();
+
+    // Calculate error rate
+    const errorRate =
+      this.serviceHealth.totalCompilations > 0
+        ? this.serviceHealth.failedCompilations /
+          this.serviceHealth.totalCompilations
+        : 0;
+
+    // Determine health status
+    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+
+    if (errorRate > 0.5) {
+      status = 'unhealthy';
+    } else if (errorRate > 0.2) {
+      status = 'degraded';
+    }
+
+    // Calculate average compilation time from recent compilations
+    const avgTime =
+      this.serviceHealth.lastCompilationTimes.length > 0
+        ? this.serviceHealth.lastCompilationTimes.reduce(
+            (sum, time) => sum + time,
+            0,
+          ) / this.serviceHealth.lastCompilationTimes.length
+        : 0;
+
+    // If average compilation time is too high, degrade status
+    if (avgTime > 30000) {
+      // 30 seconds
+      status = status === 'unhealthy' ? 'unhealthy' : 'degraded';
+    }
+
+    return {
+      status,
+      lastChecked: new Date(this.serviceHealth.lastHealthCheck),
+      metrics: {
+        totalCompilations: this.serviceHealth.totalCompilations,
+        successRate:
+          this.serviceHealth.totalCompilations > 0
+            ? (this.serviceHealth.successfulCompilations /
+                this.serviceHealth.totalCompilations) *
+              100
+            : 100,
+        averageCompilationTimeMs: avgTime,
+      },
+    };
   }
 }

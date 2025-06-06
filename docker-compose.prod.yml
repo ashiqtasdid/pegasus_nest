@@ -1,38 +1,30 @@
 version: '3.8'
 
 services:
+  # Backend API Service
   pegasus-nest:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: pegasus-nest-prod
+    container_name: pegasus-nest-api
     restart: unless-stopped
-    ports:
-      - '3000:3000'
+    networks:
+      - pegasus-network
     volumes:
-      - type: bind
-        source: ./generated
-        target: /app/generated
-      - type: bind
-        source: ./public
-        target: /app/public
+      - ./generated:/app/generated
+      - ./logs:/app/logs
+      - ./public:/app/public
+    env_file:
+      - .env.production
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - SITE_URL=${SITE_URL:-http://localhost:3000}
-      - SITE_NAME=${SITE_NAME:-Pegasus API}
-      - AI_FIXING_ENABLED=${AI_FIXING_ENABLED:-true}
-      - AUTO_FIX_ENABLED=${AUTO_FIX_ENABLED:-true}
-      - DEBUG_AI_PROMPTS=${DEBUG_AI_PROMPTS:-false}
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-    networks:
-      - pegasus-network
     deploy:
       resources:
         limits:
@@ -42,26 +34,68 @@ services:
           memory: 512M
           cpus: '0.5'
 
+  # Frontend Service
+  pegasus-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pegasus-nest-frontend
+    restart: unless-stopped
+    networks:
+      - pegasus-network
+    env_file:
+      - ./frontend/.env.production
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://pegasus-nest:3000
+    depends_on:
+      pegasus-nest:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
     container_name: pegasus-nginx
     restart: unless-stopped
     ports:
-      - '80:80'
-      - '443:443'
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro # For SSL certificates
+      - ./nginx-production.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - nginx-logs:/var/log/nginx
+    networks:
+      - pegasus-network
     depends_on:
       pegasus-nest:
         condition: service_healthy
-    networks:
-      - pegasus-network
+      pegasus-frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   pegasus-network:
     driver: bridge
 
 volumes:
+  nginx-logs:
   generated_data:
   public_data:

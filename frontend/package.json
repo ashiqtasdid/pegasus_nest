@@ -1,0 +1,49 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack --port 3003",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:init": "node scripts/init-db.js",
+    "db:test": "node scripts/test-mongodb.js",
+    "db:setup": "node scripts/init-mongodb.js"
+  },
+  "dependencies": {
+    "@auth/core": "^0.39.1",
+    "@headlessui/react": "^2.2.4",
+    "@heroicons/react": "^2.2.0",
+    "@prisma/client": "^6.9.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-auth": "^1.2.8",
+    "better-sqlite3": "^11.10.0",
+    "clsx": "^2.1.1",
+    "dotenv": "^16.5.0",
+    "lucide-react": "^0.513.0",
+    "mongodb": "^6.17.0",
+    "nanoid": "^5.1.5",
+    "next": "15.3.3",
+    "next-auth": "^4.24.11",
+    "node-fetch": "^3.3.2",
+    "prisma": "^6.9.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@better-auth/cli": "^1.2.8",
+    "@eslint/eslintrc": "^3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9",
+    "eslint-config-next": "15.3.3",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5"
+  }
+}

@@ -1,16 +1,76 @@
 version: '3.8'
 
 services:
+  # Backend API Service
   pegasus-nest:
-    build: .
-    container_name: pegasus-nest
-    restart: always
-    ports:
-      - '3000:3000'
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: pegasus-nest-api
+    restart: unless-stopped
+    networks:
+      - pegasus-network
     volumes:
-      - type: bind
-        source: ./generated
-        target: /app/generated
+      - ./generated:/app/generated
+      - ./logs:/app/logs
     environment:
       - NODE_ENV=production
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - PORT=3000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Service
+  pegasus-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pegasus-nest-frontend
+    restart: unless-stopped
+    networks:
+      - pegasus-network
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://pegasus-nest:3000
+    depends_on:
+      - pegasus-nest
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: pegasus-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/ssl/certs:ro
+      - nginx-logs:/var/log/nginx
+    networks:
+      - pegasus-network
+    depends_on:
+      - pegasus-nest
+      - pegasus-frontend
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  pegasus-network:
+    driver: bridge
+
+volumes:
+  nginx-logs:

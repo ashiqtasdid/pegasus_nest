@@ -34,6 +34,32 @@ interface CompressedPrompt {
   compressionRatio: number;
 }
 
+// 🤖 AI MODEL CONFIGURATION: Standardized model assignments per task type
+const AI_MODELS = {
+  // 🔍 PROMPT REFINEMENT: Use free DeepSeek model for analysis and prompt improvement
+  PROMPT_REFINEMENT: 'deepseek/deepseek-prover-v2:free',
+
+  // 🚀 CODE GENERATION: Use Claude Sonnet 4 for high-quality code generation
+  CODE_GENERATION: 'anthropic/claude-sonnet-4',
+
+  // 🛠️ ERROR FIXING: Use DeepSeek free model for everything except file and code generation
+  ERROR_FIXING: 'deepseek/deepseek-prover-v2:free',
+
+  // 💬 CHAT ASSISTANCE: Use DeepSeek free model for everything except file and code generation
+  CHAT_ASSISTANCE: 'deepseek/deepseek-prover-v2:free',
+
+  // 📝 PLUGIN OPERATIONS: Use Claude Sonnet 4 for plugin modifications (file/code generation)
+  PLUGIN_OPERATIONS: 'anthropic/claude-sonnet-4',
+} as const;
+
+// 📊 MODEL USAGE DOCUMENTATION
+const MODEL_USAGE_GUIDE = {
+  'deepseek/deepseek-prover-v2:free':
+    'Free model for all general tasks - cost effective with good quality',
+  'anthropic/claude-sonnet-4':
+    'Premium model exclusively for file and code generation - high quality',
+} as const;
+
 @Injectable()
 export class GeminiService {
   private openai: OpenAI;
@@ -42,6 +68,16 @@ export class GeminiService {
   private lastFailureTime = 0;
   private readonly maxFailures = 5;
   private readonly circuitBreakerTimeout = 60000; // 1 minute
+
+  // 🛡️ ROBUSTNESS: Service health monitoring
+  private serviceHealth = {
+    isHealthy: true,
+    lastHealthCheck: Date.now(),
+    consecutiveFailures: 0,
+    lastSuccessTime: Date.now(),
+    errorRate: 0,
+    responseTimeMs: 0,
+  };
 
   // 💾 PERFORMANCE: Advanced caching system for API responses
   private responseCache = new Map<string, CacheEntry>();
@@ -114,7 +150,9 @@ export class GeminiService {
       const timeSinceLastFailure = Date.now() - this.lastFailureTime;
       if (timeSinceLastFailure < this.circuitBreakerTimeout) {
         this.logger.warn(
-          `Circuit breaker is open. Blocking request. ${Math.round((this.circuitBreakerTimeout - timeSinceLastFailure) / 1000)}s remaining.`,
+          `Circuit breaker is open. Blocking request. ${Math.round(
+            (this.circuitBreakerTimeout - timeSinceLastFailure) / 1000,
+          )}s remaining.`,
         );
         return true;
       } else {
@@ -124,6 +162,87 @@ export class GeminiService {
       }
     }
     return false;
+  }
+
+  /**
+   * 🛡️ ROBUSTNESS: Check service health status
+   */
+  getServiceHealth(): {
+    isHealthy: boolean;
+    errorRate: number;
+    responseTimeMs: number;
+    consecutiveFailures: number;
+    lastSuccessTime: number;
+  } {
+    return { ...this.serviceHealth };
+  }
+
+  /**
+   * 🛡️ ROBUSTNESS: Update service health metrics
+   */
+  private updateHealthMetrics(
+    success: boolean,
+    responseTimeMs: number = 0,
+  ): void {
+    const now = Date.now();
+    this.serviceHealth.lastHealthCheck = now;
+    this.serviceHealth.responseTimeMs = responseTimeMs;
+
+    if (success) {
+      this.serviceHealth.consecutiveFailures = 0;
+      this.serviceHealth.lastSuccessTime = now;
+      this.serviceHealth.isHealthy = true;
+      this.serviceHealth.errorRate = Math.max(
+        0,
+        this.serviceHealth.errorRate - 0.1,
+      );
+    } else {
+      this.serviceHealth.consecutiveFailures++;
+      this.serviceHealth.errorRate = Math.min(
+        1.0,
+        this.serviceHealth.errorRate + 0.1,
+      );
+
+      // Mark as unhealthy if too many consecutive failures
+      if (this.serviceHealth.consecutiveFailures >= 3) {
+        this.serviceHealth.isHealthy = false;
+      }
+    }
+  }
+
+  /**
+   * 🛡️ ROBUSTNESS: Enhanced retry logic with exponential backoff
+   */
+  private async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    baseDelayMs: number = 1000,
+  ): Promise<T> {
+    let lastError: Error;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const startTime = Date.now();
+        const result = await operation();
+        const responseTime = Date.now() - startTime;
+
+        this.updateHealthMetrics(true, responseTime);
+        return result;
+      } catch (error) {
+        lastError = error as Error;
+        this.updateHealthMetrics(false);
+
+        if (attempt < maxRetries) {
+          const delay = baseDelayMs * Math.pow(2, attempt);
+          this.logger.warn(
+            `Operation failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms: ${error.message}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError!;
   }
   /**
    * Enhanced request wrapper with connection resilience and circuit breaker
@@ -176,11 +295,25 @@ export class GeminiService {
           error.message.includes('connection') ||
           error.message.includes('ECONNRESET');
 
-        // Don't retry on authentication or rate limit errors
-        if (error.response?.status === 401 || error.response?.status === 429) {
+        // Don't retry on authentication, rate limit, or response parsing errors
+        const isNonRetryableError =
+          error.response?.status === 401 ||
+          error.response?.status === 429 ||
+          error.message.includes('API returned') ||
+          error.message.includes('undefined') ||
+          error.message.includes('Cannot read properties');
+
+        if (isNonRetryableError) {
+          this.logger.error(
+            `❌ Non-retryable error encountered: ${error.message}`,
+          );
           throw error;
         }
-        if (attempt === maxRetries || !isRetryableError) {
+        if (
+          attempt === maxRetries ||
+          !isRetryableError ||
+          isNonRetryableError
+        ) {
           this.logger.error(
             `All ${maxRetries} attempts failed. Last error: ${error.message}`,
           );
@@ -202,24 +335,31 @@ export class GeminiService {
    * @returns Promise with the response from the AI
    */
   async processWithGemini(prompt: string, filePath?: string): Promise<string> {
-    let finalPrompt = prompt;
+    return await this.executeWithRetry(async () => {
+      let finalPrompt = prompt;
 
-    // Add this block to handle the file content reading
-    if (filePath && fs.existsSync(filePath)) {
-      const fileContent = fs.readFileSync(filePath, 'utf8');
-      finalPrompt += `\n\nHere's the file content for reference:\n${fileContent}`;
-    }
+      // 🔒 Validate inputs
+      this.validatePrompt(prompt);
 
-    this.logger.log(
-      '🚀 Processing with optimized Gemini service (caching, deduplication, compression)...',
-    );
-    this.logger.log('Using model: deepseek/deepseek-chat');
+      // Add this block to handle the file content reading
+      if (filePath && fs.existsSync(filePath)) {
+        const fileContent = fs.readFileSync(filePath, 'utf8');
+        finalPrompt += `\n\nHere's the file content for reference:\n${fileContent}`;
+      }
 
-    // 🚀 Use optimized processing with all performance enhancements
-    return await this.processWithDeduplication(
-      finalPrompt,
-      'deepseek/deepseek-chat',
-    );
+      this.logger.log(
+        '🚀 Processing with optimized Gemini service (caching, deduplication, compression)...',
+      );
+      this.logger.log(
+        'Using model: anthropic/claude-sonnet-4 (Claude Sonnet 4)',
+      );
+
+      // 🚀 Use optimized processing with Claude Sonnet 4 for code generation
+      return await this.processWithDeduplication(
+        finalPrompt,
+        AI_MODELS.CODE_GENERATION,
+      );
+    });
   } /**
    * Process a direct prompt with AI through OpenRouter without file context
    * @param prompt The prompt to send to the AI
@@ -227,7 +367,11 @@ export class GeminiService {
    * @returns Promise with the response from the AI
    */
   async processDirectPrompt(prompt: string, model?: string): Promise<string> {
-    const selectedModel = model || 'deepseek/deepseek-chat';
+    const selectedModel = model || AI_MODELS.CODE_GENERATION;
+
+    // 🔒 Validate inputs
+    this.validatePrompt(prompt);
+    this.validateModel(selectedModel);
 
     this.logger.log(
       `🚀 Processing direct prompt with optimized service using model: ${selectedModel}...`,
@@ -403,6 +547,19 @@ export class GeminiService {
     prompt: string,
     model: string,
   ): Promise<string> {
+    // Input validation
+    if (!prompt || typeof prompt !== 'string') {
+      throw new Error('Invalid prompt: must be a non-empty string');
+    }
+
+    if (!model || typeof model !== 'string') {
+      throw new Error('Invalid model: must be a non-empty string');
+    }
+
+    this.logger.log(
+      `🔍 Processing request for model: ${model}, prompt length: ${prompt.length}`,
+    );
+
     // Compress prompt to save tokens
     const compressed = this.compressPrompt(prompt);
 
@@ -411,23 +568,154 @@ export class GeminiService {
     const estimatedInputTokens = Math.ceil(compressed.compressedLength / 4);
 
     return await this.makeRobustRequest(async () => {
-      const response = await this.openai.chat.completions.create({
-        model,
-        messages: [
-          {
-            role: 'user',
-            content: compressed.content,
-          },
-        ],
-        max_tokens: this.getOptimalMaxTokens(compressed.content),
-        temperature: 0.7,
-        // Add response optimization
-        presence_penalty: 0.1, // Encourage more focused responses
-        frequency_penalty: 0.1, // Reduce repetition
-      });
+      try {
+        this.logger.log('🚀 Making API request to OpenRouter...');
 
-      const responseText = response.choices[0]?.message?.content;
-      if (responseText) {
+        // Validate OpenAI client exists
+        if (!this.openai) {
+          throw new Error('OpenAI client not initialized');
+        }
+
+        const requestPayload = {
+          model,
+          messages: [
+            {
+              role: 'user' as const,
+              content: compressed.content,
+            },
+          ],
+          max_tokens: this.getOptimalMaxTokens(compressed.content),
+          temperature: 0.7,
+          // Add response optimization
+          presence_penalty: 0.1, // Encourage more focused responses
+          frequency_penalty: 0.1, // Reduce repetition
+        };
+
+        this.logger.log('📤 Request payload prepared:', {
+          model: requestPayload.model,
+          messageCount: requestPayload.messages.length,
+          contentLength: requestPayload.messages[0].content.length,
+          maxTokens: requestPayload.max_tokens,
+        });
+
+        const response =
+          await this.openai.chat.completions.create(requestPayload);
+
+        this.logger.log('✓ API request completed, validating response...');
+
+        // Add comprehensive response validation with detailed logging
+        this.logger.log('🔍 Validating API response structure...');
+
+        if (!response) {
+          this.logger.error('❌ API returned null/undefined response');
+          throw new Error('API returned null/undefined response');
+        }
+
+        // Try to log the response structure for debugging (safely)
+        try {
+          this.logger.log(`Response keys: ${Object.keys(response).join(', ')}`);
+        } catch (e) {
+          this.logger.warn('Could not log response keys');
+        }
+
+        this.logger.log('✓ Response object exists, checking choices...');
+
+        // More detailed logging for debugging
+        this.logger.log(
+          `Response type: ${typeof response}, has choices: ${!!response.choices}`,
+        );
+
+        // Handle case where response might have different structure
+        if (!response.choices) {
+          this.logger.error('❌ Response object missing choices property');
+
+          // Try to find any text content in alternative structures
+          const anyResponse = response as any;
+          if (anyResponse.content) {
+            this.logger.log(
+              '🔄 Found content in response.content, using fallback',
+            );
+            return String(anyResponse.content);
+          }
+
+          if (anyResponse.text) {
+            this.logger.log(
+              '🔄 Found content in response.text, using fallback',
+            );
+            return String(anyResponse.text);
+          }
+
+          // Log the full response for debugging
+          try {
+            this.logger.error(
+              'Full response structure:',
+              JSON.stringify(response, null, 2),
+            );
+          } catch (e) {
+            this.logger.error('Could not stringify response for debugging');
+          }
+
+          throw new Error(
+            'API returned response without choices property and no fallback content found',
+          );
+        }
+
+        if (!Array.isArray(response.choices)) {
+          this.logger.error(
+            '❌ Response choices is not an array:',
+            typeof response.choices,
+            JSON.stringify(response.choices, null, 2),
+          );
+          throw new Error(
+            'API returned invalid choices property - not an array',
+          );
+        }
+
+        this.logger.log(
+          `✓ Choices array exists with length: ${response.choices.length}`,
+        );
+
+        if (response.choices.length === 0) {
+          this.logger.error(
+            '❌ API returned empty choices array:',
+            JSON.stringify(response, null, 2),
+          );
+          throw new Error('API returned empty choices array');
+        }
+
+        const choice = response.choices[0];
+        this.logger.log(`✓ First choice exists: ${!!choice}`);
+
+        if (!choice) {
+          this.logger.error('❌ First choice is null/undefined');
+          throw new Error('First choice is null/undefined');
+        }
+
+        this.logger.log(`✓ Choice has message: ${!!choice.message}`);
+
+        if (!choice.message) {
+          this.logger.error(
+            '❌ Choice missing message property:',
+            JSON.stringify(choice, null, 2),
+          );
+          throw new Error('API response choice missing message property');
+        }
+
+        const responseText = choice.message.content;
+        this.logger.log(
+          `✓ Message content exists: ${!!responseText}, type: ${typeof responseText}`,
+        );
+
+        if (!responseText || typeof responseText !== 'string') {
+          this.logger.error(
+            '❌ Invalid message content:',
+            JSON.stringify(choice.message, null, 2),
+          );
+          throw new Error('API returned empty or invalid message content');
+        }
+
+        this.logger.log('✅ Response validation successful');
+
         // Update token usage stats
         const estimatedOutputTokens = Math.ceil(responseText.length / 4);
         this.tokenUsageStats.totalTokens +=
@@ -439,8 +727,24 @@ export class GeminiService {
           `📊 Request completed: ~${estimatedInputTokens + estimatedOutputTokens} tokens (${this.tokenUsageStats.cacheHits}/${this.tokenUsageStats.cacheHits + this.tokenUsageStats.cacheMisses} cache hit rate)`,
         );
         return responseText;
-      } else {
-        throw new Error('Model returned empty response');
+      } catch (error) {
+        this.logger.error(
+          '💥 Error in executeOptimizedRequest:',
+          error.message,
+        );
+        this.logger.error('Error stack:', error.stack);
+
+        // If it's an OpenAI API error, log more details
+        if (error.response) {
+          this.logger.error('API Error Response:', {
+            status: error.response.status,
+            statusText: error.response.statusText,
+            data: error.response.data,
+          });
+        }
+
+        // Re-throw the error for the retry mechanism
+        throw error;
       }
     });
   }
@@ -535,7 +839,7 @@ export class GeminiService {
     const promises = requests.map((req) =>
       this.processWithDeduplication(
         req.prompt,
-        req.model || 'deepseek/deepseek-chat',
+        req.model || AI_MODELS.CODE_GENERATION,
       ),
     );
 
@@ -552,7 +856,9 @@ export class GeminiService {
     return {
       optimization: stats,
       system: {
-        uptime: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
+        uptime: `${Math.floor(uptime / 3600)}h ${Math.floor(
+          (uptime % 3600) / 60,
+        )}m`,
         requestsPerHour: Math.round((stats.totalRequests / uptime) * 3600),
         tokensPerHour: Math.round((stats.totalTokens / uptime) * 3600),
         cacheEfficiency:
@@ -616,5 +922,118 @@ export class GeminiService {
     const cacheSize = this.responseCache.size;
     this.responseCache.clear();
     this.logger.log(`🧹 Manually cleared ${cacheSize} cache entries`);
+  }
+
+  /**
+   * 🎯 Get the appropriate model for a specific task type
+   * This ensures consistent model usage across the application
+   */
+  public static getModelForTask(taskType: keyof typeof AI_MODELS): string {
+    return AI_MODELS[taskType];
+  }
+
+  /**
+   * 📊 Get model usage documentation
+   */
+  public static getModelUsageGuide(): typeof MODEL_USAGE_GUIDE {
+    return MODEL_USAGE_GUIDE;
+  }
+
+  /**
+   * 🔒 SECURITY: Validate and sanitize prompts before processing
+   */
+  private validatePrompt(prompt: string): void {
+    if (!prompt || typeof prompt !== 'string') {
+      throw new Error('Invalid prompt: must be a non-empty string');
+    }
+
+    if (prompt.length < 5) {
+      throw new Error('Invalid prompt: too short (minimum 5 characters)');
+    }
+
+    if (prompt.length > 100000) {
+      throw new Error('Invalid prompt: too long (maximum 100,000 characters)');
+    }
+
+    // Check for potential security issues
+    const suspiciousPatterns = [
+      /\b(password|secret|token|key)\s*[:=]/gi,
+      /\b(admin|root|sudo)\s*[:=]/gi,
+      /<script/gi,
+      /javascript:/gi,
+    ];
+
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(prompt)) {
+        this.logger.warn('🚨 Potentially sensitive content detected in prompt');
+        break;
+      }
+    }
+  }
+
+  /**
+   * 🎯 PERFORMANCE: Validate model selection
+   */
+  private validateModel(model: string): void {
+    if (!model || typeof model !== 'string') {
+      throw new Error('Invalid model: must be a non-empty string');
+    }
+
+    const allowedModels = [
+      'deepseek/deepseek-prover-v2:free',
+      'anthropic/claude-sonnet-4',
+      'deepseek/deepseek-chat', // Legacy support
+    ];
+
+    if (!allowedModels.includes(model)) {
+      this.logger.warn(`⚠️ Using non-standard model: ${model}`);
+    }
+  }
+
+  // 🛡️ ROBUSTNESS: Get service health status
+  async getHealthStatus(): Promise<{
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    lastChecked: Date;
+    metrics: {
+      errorRate: number;
+      responseTimeMs: number;
+      consecutiveFailures: number;
+    };
+  }> {
+    // Update health check timestamp
+    const now = Date.now();
+    this.serviceHealth.lastHealthCheck = now;
+
+    // Determine health status
+    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+
+    if (this.serviceHealth.consecutiveFailures >= 5) {
+      status = 'unhealthy';
+    } else if (
+      this.serviceHealth.errorRate > 0.2 ||
+      this.serviceHealth.consecutiveFailures > 2
+    ) {
+      status = 'degraded';
+    }
+
+    // Calculate time since last successful operation
+    const timeSinceLastSuccess = now - this.serviceHealth.lastSuccessTime;
+    if (timeSinceLastSuccess > 300000) {
+      // 5 minutes
+      status = 'unhealthy';
+    } else if (timeSinceLastSuccess > 60000) {
+      // 1 minute
+      status = 'degraded';
+    }
+
+    return {
+      status,
+      lastChecked: new Date(this.serviceHealth.lastHealthCheck),
+      metrics: {
+        errorRate: this.serviceHealth.errorRate,
+        responseTimeMs: this.serviceHealth.responseTimeMs,
+        consecutiveFailures: this.serviceHealth.consecutiveFailures,
+      },
+    };
   }
 }

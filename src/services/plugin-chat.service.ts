@@ -28,67 +28,35 @@ export class PluginChatService {
     private readonly codeCompilerService: CodeCompilerService,
     private readonly promptRefinementService: PromptRefinementService,
   ) {}
-
   /**
    * Enhanced chat response with prompt refinement and better error handling
+   * Currently under construction - returning maintenance message
    */
   async getChatResponseWithRefinement(
     message: string,
     pluginName: string,
   ): Promise<string> {
-    const startTime = Date.now();
     this.logger.log(
-      `Starting enhanced chat processing for plugin: ${pluginName}`,
+      `Chat system under construction - request for plugin: ${pluginName}`,
     );
 
-    try {
-      // Get folder path for the requested plugin
-      const folderPath = path.join(process.cwd(), 'generated', pluginName);
+    // Return under construction message
+    return `🚧 **Chat System Under Construction** 🚧
 
-      // Check if plugin directory exists
-      if (!fs.existsSync(folderPath)) {
-        return `I don't have information about a plugin named "${pluginName}". Please generate it first.`;
-      } // Set a timeout for the entire operation to prevent hanging
-      const timeoutPromise = new Promise<string>((_, reject) => {
-        setTimeout(() => {
-          reject(new Error('Chat request timed out after 5 minutes'));
-        }, 300000); // Increased to 5 minutes
-      });
+The chat system is currently being reworked and improved. This feature is temporarily unavailable while we enhance the user experience and add new capabilities.
 
-      // Create the main processing promise
-      const processingPromise = this.processEnhancedChat(
-        message,
-        pluginName,
-        folderPath,
-      );
+**What's Coming:**
+• Enhanced AI conversation capabilities
+• Better plugin understanding and analysis
+• Improved response accuracy and speed
+• New interactive features
 
-      // Race between timeout and processing
-      const result = await Promise.race([processingPromise, timeoutPromise]);
+**Current Status:** Under Development
+**Expected Return:** Soon™
 
-      const duration = Date.now() - startTime;
-      this.logger.log(`Enhanced chat processing completed in ${duration}ms`);
+Thank you for your patience! In the meantime, you can still generate new plugins using the main plugin creation form above.
 
-      return result;
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      this.logger.error(
-        `Enhanced chat processing failed after ${duration}ms: ${error.message}`,
-      );
-
-      // Handle specific error types with better user messages
-      if (error.message.includes('timeout')) {
-        return `Your request is taking longer than expected. Please try a simpler modification or try again in a moment.`;
-      } else if (
-        error.message.includes('ECONNRESET') ||
-        error.message.includes('socket hang up')
-      ) {
-        return `Connection was interrupted. Please try your request again.`;
-      } else if (error.message.includes('Rate limit')) {
-        return `Too many requests right now. Please wait a moment before trying again.`;
-      } else {
-        return `I encountered an issue: ${error.message}. Please try rephrasing your request.`;
-      }
-    }
+If you need help with "${pluginName}", you can try regenerating it with more detailed instructions in the description field.`;
   }
 
   /**
@@ -161,13 +129,50 @@ export class PluginChatService {
     // Step 3: Process with AI using retry logic for connection resilience
     const aiResponse = await this.processWithRetry(prompt);
 
+    // Add debug logging to see what AI is returning
+    this.logger.log(`AI Response received (length: ${aiResponse.length})`);
+    this.logger.log(
+      `AI Response (first 1000 chars): ${aiResponse.substring(0, 1000)}`,
+    );
+
     // Step 4: Parse and apply modifications
     let pluginModification: PluginModification;
     try {
       pluginModification = this.parseAIResponse(aiResponse);
+
+      // Check if we got an empty modification (fallback case)
+      const totalOperations =
+        pluginModification.createdFiles.length +
+        pluginModification.modifiedFiles.length +
+        pluginModification.deletedFiles.length;
+
+      if (totalOperations === 0) {
+        // If no file operations, treat as a simple question response
+        this.logger.log(
+          'No file modifications requested, treating as informational query',
+        );
+
+        // Try to extract useful information from the AI response for user
+        const cleanResponse = aiResponse
+          .replace(/{[\s\S]*}/, '') // Remove any JSON attempt
+          .replace(/```[\s\S]*?```/g, '') // Remove code blocks
+          .trim();
+
+        if (cleanResponse.length > 50) {
+          return cleanResponse;
+        } else {
+          return this.createInformationalResponse(pluginName, pluginContext);
+        }
+      }
     } catch (error) {
       this.logger.error(`Failed to parse AI response: ${error.message}`);
-      return `I received a response but couldn't parse it correctly. Here's what I understood:\n\n${aiResponse.substring(0, 500)}...`;
+
+      // Try to provide a helpful response based on the original message
+      return this.createInformationalResponse(
+        pluginName,
+        pluginContext,
+        message,
+      );
     }
 
     // Step 5: Apply file operations
@@ -291,6 +296,14 @@ IMPLEMENTATION GUIDELINES:
 6. Test for edge cases and provide user-friendly messages
 7. Optimize for performance and memory usage
 
+BUKKIT COLOR API REQUIREMENTS:
+- NEVER use Color.valueOf(String) - this method does not exist in Bukkit Color API
+- For RGB colors from hex: use Color.fromRGB(int r, int g, int b) or Color.fromRGB(int rgb)
+- For named colors: use Color.RED, Color.BLUE, Color.GREEN, etc. (static constants)
+- For chat colors: use ChatColor.RED, ChatColor.BLUE, etc. (not Color class)
+- Example correct usage: Color.fromRGB(255, 0, 0) for red, Color.BLUE for blue
+- Example WRONG usage: Color.valueOf("RED") - DO NOT USE THIS
+
 Remember: Only output valid JSON with no additional text. The path should be relative to the plugin's root directory.
 `;
   }
@@ -316,15 +329,55 @@ Remember: Only output valid JSON with no additional text. The path should be rel
         );
         return;
       }
-    }
-
-    // Generate/regenerate documentation
+    } // Generate/regenerate documentation
     try {
       this.logger.log(`Generating documentation for plugin '${pluginName}'...`);
 
+      // Validate paths before using them
+      if (!pluginFolderPath) {
+        this.logger.error(
+          `Plugin folder path is undefined for plugin: ${pluginName}`,
+        );
+        throw new Error(
+          `Plugin folder path is undefined for plugin: ${pluginName}`,
+        );
+      }
+      if (!docFilePath) {
+        this.logger.error(
+          `Documentation file path is undefined for plugin: ${pluginName}`,
+        );
+        throw new Error(
+          `Documentation file path is undefined for plugin: ${pluginName}`,
+        );
+      }
+
+      // Ensure plugin folder exists
+      if (!fs.existsSync(pluginFolderPath)) {
+        this.logger.error(`Plugin folder does not exist: ${pluginFolderPath}`);
+        throw new Error(`Plugin folder does not exist: ${pluginFolderPath}`);
+      }
+
+      const sourcePath = path.join(pluginFolderPath, 'src');
+      this.logger.debug(`Source path: ${sourcePath}, Doc path: ${docFilePath}`);
+
+      // Check if source path exists
+      if (!fs.existsSync(sourcePath)) {
+        this.logger.warn(
+          `Source path does not exist: ${sourcePath}, creating basic documentation`,
+        );
+        // Create basic documentation if source doesn't exist
+        const basicDoc = `Plugin: ${pluginName}\nStatus: Generated but source files not found\nLocation: ${pluginFolderPath}`;
+        const docDir = path.dirname(docFilePath);
+        if (!fs.existsSync(docDir)) {
+          fs.mkdirSync(docDir, { recursive: true });
+        }
+        fs.writeFileSync(docFilePath, basicDoc, 'utf8');
+        return;
+      }
+
       // Use FileCompilerService to compile plugin files
       await this.fileCompilerService.compileDirectoryToTxt(
-        path.join(pluginFolderPath, 'src'),
+        sourcePath,
         docFilePath,
       );
 
@@ -389,36 +442,141 @@ Also, only include files that are relevant to the request. & make sure to includ
 
 Remember: Only output valid JSON with no additional text. The path should be relative to the plugin's root directory.
 `;
-  }
-
-  /**
+  } /**
    * Parses the AI response to extract file operations
    */
   private parseAIResponse(aiResponse: string): PluginModification {
     try {
-      // Try to find JSON in the response (sometimes AI might add explanatory text)
-      const jsonRegex = /{[\s\S]*}/;
-      const match = aiResponse.match(jsonRegex);
+      // Add debug logging to see the raw response
+      this.logger.debug(`Raw AI Response length: ${aiResponse.length}`);
+      this.logger.debug(
+        `First 200 chars: ${JSON.stringify(aiResponse.substring(0, 200))}`,
+      );
 
-      if (!match) {
-        throw new Error('No valid JSON found in the AI response');
+      // Multiple strategies to extract valid JSON from AI response
+
+      // Strategy 1: Clean the response of any BOM or invisible characters
+      let cleanResponse = aiResponse.replace(/^\uFEFF/, ''); // Remove BOM
+      cleanResponse = cleanResponse.replace(/^\s+/, ''); // Remove leading whitespace
+      cleanResponse = cleanResponse.replace(/\s+$/, ''); // Remove trailing whitespace
+
+      // Strategy 2: Try to find complete JSON block with balanced braces
+      const jsonRegex = /{[\s\S]*}/;
+      let match = cleanResponse.match(jsonRegex);
+
+      if (match) {
+        let jsonStr = match[0];
+        this.logger.debug(`Extracted JSON string length: ${jsonStr.length}`);
+        this.logger.debug(
+          `First 100 chars of JSON: ${JSON.stringify(jsonStr.substring(0, 100))}`,
+        );
+
+        // Strategy 3: Find the last complete JSON object by balancing braces
+        let braceCount = 0;
+        let lastValidEnd = -1;
+
+        for (let i = 0; i < jsonStr.length; i++) {
+          if (jsonStr[i] === '{') {
+            braceCount++;
+          } else if (jsonStr[i] === '}') {
+            braceCount--;
+            if (braceCount === 0) {
+              lastValidEnd = i;
+            }
+          }
+        }
+
+        if (lastValidEnd > 0) {
+          jsonStr = jsonStr.substring(0, lastValidEnd + 1);
+          this.logger.debug(
+            `Truncated JSON to valid end: ${lastValidEnd + 1} chars`,
+          );
+        }
+
+        // Strategy 4: Clean up common JSON issues
+        jsonStr = this.cleanJsonString(jsonStr);
+        this.logger.debug(
+          `Cleaned JSON first 100 chars: ${JSON.stringify(jsonStr.substring(0, 100))}`,
+        );
+
+        // Try parsing the cleaned JSON
+        const result = JSON.parse(jsonStr) as PluginModification;
+
+        // Validate and normalize the structure
+        if (!result.createdFiles) result.createdFiles = [];
+        if (!result.modifiedFiles) result.modifiedFiles = [];
+        if (!result.deletedFiles) result.deletedFiles = [];
+
+        this.logger.log(
+          `Successfully parsed AI response: ${result.createdFiles.length} created, ${result.modifiedFiles.length} modified, ${result.deletedFiles.length} deleted files`,
+        );
+        return result;
       }
 
-      const jsonStr = match[0];
-      const result = JSON.parse(jsonStr) as PluginModification;
-
-      // Validate the structure
-      if (!result.createdFiles) result.createdFiles = [];
-      if (!result.modifiedFiles) result.modifiedFiles = [];
-      if (!result.deletedFiles) result.deletedFiles = [];
-
-      return result;
+      // Strategy 4: If no JSON found, create empty modification
+      this.logger.warn(
+        'No valid JSON found in AI response, creating empty modification',
+      );
+      return {
+        createdFiles: [],
+        modifiedFiles: [],
+        deletedFiles: [],
+      };
     } catch (error) {
       this.logger.error(`Failed to parse AI response: ${error.message}`);
-      throw new Error(
-        `Could not parse AI response as valid JSON: ${error.message}`,
+      this.logger.debug(
+        `AI Response (first 500 chars): ${aiResponse.substring(0, 500)}`,
       );
+
+      // Fallback: return empty modification instead of throwing
+      this.logger.warn('Falling back to empty modification due to parse error');
+      return {
+        createdFiles: [],
+        modifiedFiles: [],
+        deletedFiles: [],
+      };
     }
+  } /**
+   * Cleans common JSON formatting issues from AI responses
+   */
+  private cleanJsonString(jsonStr: string): string {
+    // Remove any text before the first {
+    const firstBrace = jsonStr.indexOf('{');
+    if (firstBrace > 0) {
+      jsonStr = jsonStr.substring(firstBrace);
+    }
+
+    // Remove any BOM or non-printable control characters
+    jsonStr = jsonStr.replace(/^\uFEFF/, ''); // Remove BOM
+    jsonStr = jsonStr.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ''); // Remove control chars except \t, \n, \r
+
+    // Try to parse as-is first (the AI might have given us proper JSON)
+    try {
+      JSON.parse(jsonStr);
+      return jsonStr; // If it parses successfully, return as-is
+    } catch (e) {
+      // If parsing fails, try to fix common issues
+    }
+
+    // Fix unescaped newlines and tabs within string values
+    jsonStr = jsonStr.replace(
+      /"([^"]*?)(\n)([^"]*?)"/g,
+      (match, before, newline, after) => {
+        return `"${before}\\n${after}"`;
+      },
+    );
+
+    jsonStr = jsonStr.replace(
+      /"([^"]*?)(\t)([^"]*?)"/g,
+      (match, before, tab, after) => {
+        return `"${before}\\t${after}"`;
+      },
+    );
+
+    // Remove trailing commas before closing braces or brackets
+    jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+
+    return jsonStr;
   }
 
   /**
@@ -575,11 +733,100 @@ ${results.join('\n')}
         this.logger.error(`Maven output: ${result.output}`);
         throw new Error(`Maven compilation failed: ${result.error}`);
       }
-
       this.logger.log('Maven compilation successful');
     } catch (error) {
       this.logger.error(`Error during clean and recompile: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Creates an informational response when AI parsing fails or when providing general information
+   */
+  private createInformationalResponse(
+    pluginName: string,
+    pluginContext: string,
+    message?: string,
+  ): string {
+    this.logger.debug(
+      `Creating informational response for plugin: ${pluginName}`,
+    );
+
+    // Extract key information from the plugin context
+    const hasCommands =
+      pluginContext.includes('CommandExecutor') ||
+      pluginContext.includes('@Override\n    public boolean onCommand');
+    const hasListeners =
+      pluginContext.includes('Listener') ||
+      pluginContext.includes('@EventHandler');
+    const hasConfig =
+      pluginContext.includes('config.yml') ||
+      pluginContext.includes('getConfig()');
+    const hasPermissions =
+      pluginContext.includes('permission') ||
+      pluginContext.includes('Permission');
+
+    // Build a helpful response based on available features
+    let response = `Here's what I can tell you about **${pluginName}**:\n\n`;
+
+    // Add feature overview
+    const features = [];
+    if (hasCommands)
+      features.push('✅ **Commands** - Custom commands are implemented');
+    if (hasListeners)
+      features.push('✅ **Event Listeners** - Responds to game events');
+    if (hasConfig)
+      features.push('✅ **Configuration** - Customizable settings available');
+    if (hasPermissions)
+      features.push('✅ **Permissions** - Access control implemented');
+
+    if (features.length > 0) {
+      response += '**Features:**\n' + features.join('\n') + '\n\n';
+    }
+
+    // Add basic information
+    response += '**Basic Information:**\n';
+    response += `• Plugin Type: Bukkit/Spigot compatible\n`;
+    response += `• Language: Java\n`;
+    response += `• Build System: Maven\n\n`;
+
+    // Add helpful suggestions based on the message
+    if (message) {
+      const lowerMessage = message.toLowerCase();
+
+      if (lowerMessage.includes('install')) {
+        response += '**Installation:**\n';
+        response += '• Download the JAR file\n';
+        response += "• Place it in your server's `plugins/` folder\n";
+        response += '• Restart your server\n\n';
+      }
+
+      if (lowerMessage.includes('command')) {
+        response += hasCommands
+          ? '**Commands:** This plugin includes custom commands. Check the main plugin class for details.\n\n'
+          : "**Commands:** This plugin doesn't appear to have custom commands.\n\n";
+      }
+
+      if (lowerMessage.includes('config')) {
+        response += hasConfig
+          ? '**Configuration:** This plugin includes a configuration system. Look for `config.yml` in the resources folder.\n\n'
+          : "**Configuration:** This plugin doesn't appear to have configuration options.\n\n";
+      }
+
+      if (lowerMessage.includes('permission')) {
+        response += hasPermissions
+          ? '**Permissions:** This plugin includes permission checks. Review the code for specific permission nodes.\n\n'
+          : "**Permissions:** This plugin doesn't appear to use permissions.\n\n";
+      }
+    }
+
+    // Add general help
+    response += '**Need more help?** Try asking:\n';
+    response += '• "How do I install this plugin?"\n';
+    response += '• "What commands does this plugin have?"\n';
+    response += '• "How do I configure this plugin?"\n';
+    response += '• "What permissions does this plugin use?"\n';
+
+    return response;
   }
 }

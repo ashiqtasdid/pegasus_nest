@@ -1,275 +1,242 @@
-# 🐳 Docker Deployment Guide - Pegasus Nest API
+# Pegasus Nest Docker Deployment Guide
 
-## ✅ Pre-Deployment Checklist
+This guide covers deploying the complete Pegasus Nest application (NestJS backend + Next.js frontend) using Docker.
 
-Your codebase is **ready for Docker deployment on Linux** with the following configurations:
+## 🚀 Quick Start
 
-### Fixed Issues:
-
-- ✅ **Port standardization**: Unified to port 3000
-- ✅ **Package manager**: Added pnpm-lock.yaml to Dockerfile
-- ✅ **Environment files**: Created production configurations
-- ✅ **Cross-platform paths**: Application handles Linux paths correctly
-- ✅ **Health checks**: Implemented for container monitoring
-
-## 🚀 Deployment Options
-
-### Option 1: Simple Development Deployment
-
-```bash
-# Linux/macOS
-./deploy.sh
-
-# Windows PowerShell
-./deploy.ps1
-```
-
-### Option 2: Production Deployment
-
-```bash
-# Linux/macOS
-docker-compose -f docker-compose.prod.yml --env-file .env.production up -d
-
-# Windows PowerShell
-./deploy.ps1 -Production
-```
-
-### Option 3: Advanced Docker Deployment (Windows)
-
+### Local Deployment
 ```powershell
-# Development
-./deploy-docker.ps1 -Environment dev
+# Deploy locally with Docker
+.\local-deploy.ps1
 
-# Production with monitoring
-./deploy-docker.ps1 -Environment prod -Monitor
+# Deploy with API key
+.\local-deploy.ps1 -OpenRouterApiKey "sk-your-key-here"
 
-# Clean rebuild
-./deploy-docker.ps1 -Environment prod -Clean
+# Force rebuild and show logs
+.\local-deploy.ps1 -Force -Logs
 ```
 
-## 📋 Environment Setup
+### VPS Deployment
+```powershell
+# Deploy to VPS (37.114.41.124)
+.\vps-deploy.ps1
 
-### 1. Production Environment (.env.production)
+# Deploy with API key
+.\vps-deploy.ps1 -OpenRouterApiKey "sk-your-key-here"
 
+# Deploy to custom VPS
+.\vps-deploy.ps1 -VpsIp "your-vps-ip" -SshUser "your-user"
+
+# Force rebuild
+.\vps-deploy.ps1 -Force
+```
+
+## 📋 Prerequisites
+
+### For Local Deployment
+- Docker Desktop installed and running
+- PowerShell (Windows) or Bash (Linux/macOS)
+
+### For VPS Deployment
+- SSH access to your VPS (key-based authentication recommended)
+- VPS running Linux (Ubuntu/Debian/CentOS)
+- SSH client installed locally
+
+## 🏗️ Architecture
+
+The deployment includes:
+
+1. **Backend Service** (`pegasus-nest`)
+   - NestJS API server
+   - Port: 3000 (internal)
+   - Health check: `/health`
+
+2. **Frontend Service** (`pegasus-frontend`)
+   - Next.js application
+   - Port: 3000 (internal)
+   - Standalone build for optimal performance
+
+3. **Nginx Reverse Proxy**
+   - Routes traffic between frontend and backend
+   - Port: 80 (external)
+   - Static file serving with caching
+
+## 🔧 Configuration
+
+### Environment Variables
+
+**Backend (.env.production):**
 ```bash
 NODE_ENV=production
-OPENROUTER_API_KEY=your_actual_api_key_here
+OPENROUTER_API_KEY=your_key_here
 PORT=3000
-SITE_URL=https://your-domain.com
-SITE_NAME=Pegasus API
-AI_FIXING_ENABLED=true
-AUTO_FIX_ENABLED=true
-DEBUG_AI_PROMPTS=false
+SITE_URL=http://37.114.41.124
+JWT_SECRET=your_jwt_secret
 ```
 
-### 2. Development Environment (.env)
-
+**Frontend (frontend/.env.production):**
 ```bash
-NODE_ENV=development
-OPENROUTER_API_KEY=your_api_key_here
-PORT=3000
-SITE_URL=http://localhost:3000
-SITE_NAME=Pegasus API Dev
-AI_FIXING_ENABLED=true
-AUTO_FIX_ENABLED=true
-DEBUG_AI_PROMPTS=true
+NODE_ENV=production
+NEXT_PUBLIC_API_URL=http://37.114.41.124/api
+NEXT_PUBLIC_SITE_URL=http://37.114.41.124
+NEXTAUTH_URL=http://37.114.41.124
 ```
 
-## 🐳 Docker Configurations
+### Docker Compose Files
 
-### Development Stack (docker-compose.yml)
+- `docker-compose.yml` - Development/local deployment
+- `docker-compose.prod.yml` - Production deployment with resource limits
 
-- **Application**: Port 3000
-- **Direct access**: No reverse proxy
-- **Volumes**: Local development folders
-- **Environment**: Development settings
+### Nginx Configuration
 
-### Production Stack (docker-compose.prod.yml)
+- `nginx-production.conf` - Production reverse proxy configuration
+- Routes `/api/*` to backend service
+- Routes everything else to frontend service
+- Caches static assets
 
-- **Application**: Port 3000 (internal)
-- **Nginx**: Port 80/443 (external)
-- **Health checks**: Enabled
-- **Resource limits**: Configured
-- **Restart policy**: unless-stopped
+## 🛠️ Manual Commands
 
-## 🔧 Container Features
+### Build and Run Locally
+```powershell
+# Using production compose file
+docker compose -f docker-compose.prod.yml up --build -d
 
-### Application Container
+# Check status
+docker compose -f docker-compose.prod.yml ps
 
-- **Base**: `node:18-alpine`
-- **Dependencies**: Java 17, Maven, Python (for native modules)
-- **Package Manager**: pnpm
-- **Build**: TypeScript compilation
-- **Health Check**: `/health` endpoint
-
-### Nginx Container (Production)
-
-- **Base**: `nginx:alpine`
-- **Proxy**: Reverse proxy to application
-- **SSL Ready**: Certificate volume mount
-- **Health Check**: Dependency on app container
-
-## 📊 Monitoring & Management
-
-### Health Checks
-
-```bash
-# Application health
-curl http://localhost:3000/health
-
-# Detailed health
-curl http://localhost:3000/health/detailed
-
-# Optimization stats
-curl http://localhost:3000/api/optimization-stats
-```
-
-### Container Management
-
-```bash
 # View logs
-docker-compose logs -f
+docker compose -f docker-compose.prod.yml logs -f
 
-# Scale services
-docker-compose up -d --scale pegasus-nest=2
-
-# Update containers
-docker-compose pull && docker-compose up -d
-
-# Backup volumes
-docker run --rm -v pegasus_generated:/data -v $(pwd):/backup alpine tar czf /backup/generated-backup.tar.gz -C /data .
+# Stop services
+docker compose -f docker-compose.prod.yml down
 ```
 
-## 🔐 Security Considerations
-
-### 1. Environment Variables
-
-- Never commit `.env.production` with real API keys
-- Use Docker secrets for sensitive data in production
-- Rotate API keys regularly
-
-### 2. Network Security
-
-```yaml
-# Add to docker-compose.prod.yml for external networks
-networks:
-  pegasus-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
-```
-
-### 3. SSL/TLS Setup
-
+### VPS Manual Deployment
 ```bash
-# Create SSL directory
-mkdir ssl
+# On VPS, create app directory
+mkdir -p /opt/pegasus-nest
+cd /opt/pegasus-nest
 
-# Add your certificates
-cp your-cert.crt ssl/
-cp your-private.key ssl/
-
-# Update nginx.conf for HTTPS
+# Copy your files here, then:
+docker compose -f docker-compose.prod.yml up --build -d
 ```
 
-## 🚨 Troubleshooting
+## 🔍 Health Checks
+
+The deployment includes built-in health checks:
+
+- **Backend**: `http://localhost/health` or `http://your-vps-ip/health`
+- **Frontend**: `http://localhost` or `http://your-vps-ip`
+- **API**: `http://localhost/api/health` or `http://your-vps-ip/api/health`
+
+## 📊 Monitoring
+
+### View Container Status
+```powershell
+docker compose -f docker-compose.prod.yml ps
+```
+
+### View Logs
+```powershell
+# All services
+docker compose -f docker-compose.prod.yml logs -f
+
+# Specific service
+docker compose -f docker-compose.prod.yml logs -f pegasus-nest
+docker compose -f docker-compose.prod.yml logs -f pegasus-frontend
+docker compose -f docker-compose.prod.yml logs -f nginx
+```
+
+### Resource Usage
+```powershell
+docker stats
+```
+
+## 🔄 Updates and Maintenance
+
+### Update Application
+```powershell
+# Local
+.\local-deploy.ps1 -Force
+
+# VPS
+.\vps-deploy.ps1 -Force
+```
+
+### Restart Services
+```powershell
+docker compose -f docker-compose.prod.yml restart
+```
+
+### View Container Details
+```powershell
+docker compose -f docker-compose.prod.yml exec pegasus-nest bash
+docker compose -f docker-compose.prod.yml exec pegasus-frontend sh
+```
+
+## 🔧 Troubleshooting
 
 ### Common Issues
 
-1. **Port Already in Use**
-
-   ```bash
-   # Find process using port
-   lsof -i :3000
-   # Kill process or change port
+1. **Docker not running**
    ```
-
-2. **Permission Issues**
-
-   ```bash
-   # Fix volume permissions
-   sudo chown -R $USER:$USER ./generated
+   Error: Cannot connect to the Docker daemon
    ```
+   Solution: Start Docker Desktop
 
-3. **Out of Memory**
-
-   ```bash
-   # Increase Docker memory limit
-   # Update docker-compose.prod.yml resources
+2. **Port already in use**
    ```
-
-4. **API Key Issues**
-   ```bash
-   # Check environment variables
-   docker exec pegasus-nest env | grep OPENROUTER
+   Error: Port 80 is already allocated
    ```
+   Solution: Stop other services or change ports in docker-compose.prod.yml
+
+3. **SSH connection failed (VPS)**
+   ```
+   Error: SSH connection failed
+   ```
+   Solution: Ensure SSH key is set up and VPS is accessible
+
+4. **Health check failed**
+   ```
+   Error: Health check: Failed
+   ```
+   Solution: Check container logs and ensure services started properly
 
 ### Debug Commands
 
-```bash
-# Container shell access
-docker exec -it pegasus-nest sh
+```powershell
+# Check container logs
+docker compose -f docker-compose.prod.yml logs [service-name]
 
-# View application logs
-docker logs -f pegasus-nest
+# Execute into container
+docker compose -f docker-compose.prod.yml exec [service-name] bash
 
-# Check container stats
-docker stats pegasus-nest
+# Check network connectivity
+docker network ls
+docker network inspect pegasus_pegasus-network
 
-# Inspect container
-docker inspect pegasus-nest
+# Test endpoints manually
+curl http://localhost/health
+curl http://localhost/api/health
 ```
 
-## 📈 Performance Optimization
+## 🚪 URLs After Deployment
 
-### Production Optimizations
+**Local:**
+- Application: http://localhost
+- API: http://localhost/api
+- Health: http://localhost/health
 
-- **Resource limits**: Prevent memory leaks
-- **Health checks**: Auto-restart on failure
-- **Connection pooling**: Optimized HTTP agent
-- **Caching**: Response caching enabled
-- **Compression**: Nginx gzip compression
+**VPS (37.114.41.124):**
+- Application: http://37.114.41.124
+- API: http://37.114.41.124/api
+- Health: http://37.114.41.124/health
 
-### Scaling Considerations
+## 📝 Notes
 
-```yaml
-# For high-load scenarios
-deploy:
-  replicas: 3
-  resources:
-    limits:
-      memory: 4G
-      cpus: '2.0'
-```
-
-## 🎯 Next Steps
-
-1. **Set up your environment**:
-
-   - Copy `.env.production` and add your API keys
-   - Configure domain settings
-
-2. **Deploy**:
-
-   - Run deployment script for your platform
-   - Verify health checks pass
-
-3. **Monitor**:
-
-   - Set up log monitoring
-   - Configure alerts for health check failures
-
-4. **Scale** (if needed):
-   - Add load balancer
-   - Configure container orchestration
-   - Set up monitoring dashboard
-
-## 📞 Support
-
-- **Health Check**: `GET /health`
-- **API Documentation**: `GET /ui`
-- **Logs**: `docker logs pegasus-nest`
-- **Stats**: `GET /api/optimization-stats`
-
-Your Pegasus Nest API is now **production-ready** for Docker deployment on Linux! 🚀
+- The frontend is built in standalone mode for optimal Docker performance
+- Static assets are cached by Nginx for better performance
+- All services include health checks for reliable deployment
+- Resource limits are set to prevent overconsumption
+- Logs are persisted in Docker volumes
+- The chat system shows "under construction" messaging as configured

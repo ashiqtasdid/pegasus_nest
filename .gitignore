@@ -42,6 +42,7 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 .env.local
+.env.vps
 
 # temp directory
 .temp
@@ -55,3 +56,67 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Next.js build output
+.next/
+out/
+
+# Frontend dependencies and build
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/.env.local
+frontend/.env.production
+frontend/.env.development.local
+frontend/.env.test.local
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Debug files
+debug-results.md
+output.txt
+
+# Local deployment scripts (keep VPS deployment)
+deploy-docker.ps1
+deploy-production.ps1
+deploy.ps1
+deploy.sh
+dev-start.ps1
+local-deploy.ps1
+start.ps1
+vps-deploy.ps1
+update-env.sh
+verify-deployment.sh
+
+# Docker volumes and data
+data/
+volumes/
+
+# SSL certificates
+ssl/
+*.pem
+*.key
+*.crt
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache directories
+.cache/
+.parcel-cache/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Package manager locks (keep pnpm-lock.yaml for reproducible builds)
+package-lock.json
+yarn.lock
+
+# Build artifacts
+*.tgz
+*.tar.gz

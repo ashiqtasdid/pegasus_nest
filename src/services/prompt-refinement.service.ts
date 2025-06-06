@@ -30,6 +30,34 @@ export class PromptRefinementService {
   ): Promise<RefinedPrompt> {
     this.logger.log(`Refining prompt for plugin: ${pluginName}`);
 
+    // 🔒 INPUT VALIDATION: Validate inputs for security and correctness
+    if (!originalPrompt || typeof originalPrompt !== 'string') {
+      throw new Error('Invalid originalPrompt: must be a non-empty string');
+    }
+
+    if (!pluginName || typeof pluginName !== 'string') {
+      throw new Error('Invalid pluginName: must be a non-empty string');
+    }
+
+    if (originalPrompt.length < 10) {
+      throw new Error('Original prompt too short (minimum 10 characters)');
+    }
+
+    if (originalPrompt.length > 50000) {
+      throw new Error('Original prompt too long (maximum 50,000 characters)');
+    }
+
+    if (pluginName.length < 2 || pluginName.length > 50) {
+      throw new Error('Plugin name must be between 2 and 50 characters');
+    }
+
+    // Validate plugin name format (alphanumeric, hyphens, underscores only)
+    if (!/^[a-zA-Z0-9_-]+$/.test(pluginName)) {
+      throw new Error(
+        'Plugin name can only contain letters, numbers, hyphens, and underscores',
+      );
+    }
+
     try {
       // Create analysis prompt for the AI
       const analysisPrompt = this.createAnalysisPrompt(
@@ -40,7 +68,7 @@ export class PromptRefinementService {
       // Get AI analysis using deepseek model specifically for prompt refinement
       const aiAnalysis = await this.geminiService.processDirectPrompt(
         analysisPrompt,
-        'deepseek/deepseek-prover-v2:free',
+        GeminiService.getModelForTask('PROMPT_REFINEMENT'),
       );
 
       // Parse AI analysis
@@ -203,6 +231,14 @@ TECHNICAL REQUIREMENTS:
 7. Include helpful player feedback messages
 8. Follow security best practices
 
+BUKKIT COLOR API REQUIREMENTS:
+- NEVER use Color.valueOf(String) - this method does not exist in Bukkit Color API
+- For RGB colors from hex: use Color.fromRGB(int r, int g, int b) or Color.fromRGB(int rgb)
+- For named colors: use Color.RED, Color.BLUE, Color.GREEN, etc. (static constants)
+- For chat colors: use ChatColor.RED, ChatColor.BLUE, etc. (not Color class)
+- Example correct usage: Color.fromRGB(255, 0, 0) for red, Color.BLUE for blue
+- Example WRONG usage: Color.valueOf("RED") - DO NOT USE THIS
+
 OUTPUT FORMAT:
 Return ONLY valid JSON with the following structure:
 {
@@ -301,5 +337,56 @@ Create production-ready, well-documented code that fully implements all specifie
       packageName,
       className,
     };
+  }
+
+  /**
+   * 🔒 SECURITY: Validate plugin name for security
+   */
+  private validatePluginName(pluginName: string): void {
+    if (!pluginName || typeof pluginName !== 'string') {
+      throw new Error('Invalid plugin name: must be a non-empty string');
+    }
+
+    if (pluginName.length < 2) {
+      throw new Error('Invalid plugin name: too short (minimum 2 characters)');
+    }
+
+    if (pluginName.length > 50) {
+      throw new Error('Invalid plugin name: too long (maximum 50 characters)');
+    }
+
+    // Check for valid characters (alphanumeric, hyphens, underscores)
+    const validNamePattern = /^[a-zA-Z0-9_-]+$/;
+    if (!validNamePattern.test(pluginName)) {
+      throw new Error(
+        'Invalid plugin name: only alphanumeric characters, hyphens, and underscores allowed',
+      );
+    }
+  }
+
+  /**
+   * 🎯 VALIDATION: Ensure refined prompt meets quality standards
+   */
+  private validateRefinedPrompt(refinedPrompt: RefinedPrompt): void {
+    if (
+      !refinedPrompt.refinedPrompt ||
+      refinedPrompt.refinedPrompt.length < 50
+    ) {
+      throw new Error('Refined prompt is too short or empty');
+    }
+
+    if (
+      !refinedPrompt.detectedFeatures ||
+      refinedPrompt.detectedFeatures.length === 0
+    ) {
+      throw new Error('No features identified in refined prompt');
+    }
+
+    if (
+      !refinedPrompt.complexity ||
+      !['simple', 'medium', 'complex'].includes(refinedPrompt.complexity)
+    ) {
+      throw new Error('Invalid complexity level in refined prompt');
+    }
   }
 }
