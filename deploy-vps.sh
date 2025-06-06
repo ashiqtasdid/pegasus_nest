@@ -29,6 +29,12 @@ log "Checking Node.js and pnpm versions..."
 NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//' | cut -d'.' -f1 || echo "0")
 if [ "$NODE_VERSION" -lt 20 ]; then
     log "Updating Node.js to version 20..."
+    # First remove potentially conflicting packages
+    log "Removing any conflicting Node.js packages..."
+    apt-get remove -y libnode-dev nodejs || true
+    apt-get autoremove -y
+    
+    # Install Node.js 20
     curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
     apt-get install -y nodejs
 fi
