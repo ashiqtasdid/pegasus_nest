@@ -147,26 +147,34 @@ jobs:
           grep -v "API_KEY" .env || echo "No API_KEY found"
           echo "Frontend env variables:"
           grep -v "SECRET\|CLIENT_SECRET\|MONGODB_URL" frontend/.env.local || echo "Sensitive vars present"
-          EOF
-
-      - name: Deploy application
+          EOF      - name: Deploy application
         run: |
           ssh root@37.114.41.124 << 'EOF'
           cd /opt/pegasus-nest-temp
-
+          
           # Stop existing services if running
           if [ -f /opt/pegasus-nest/docker-compose.simple.yml ]; then
             cd /opt/pegasus-nest
             docker-compose -f docker-compose.simple.yml down || true
+            
+            # Clean up any orphaned containers
+            docker ps -a | grep pegasus-nest-api && docker rm -f pegasus-nest-api || true
+            docker ps -a | grep pegasus-nest-frontend && docker rm -f pegasus-nest-frontend || true
+            docker ps -a | grep pegasus-ui && docker rm -f pegasus-ui || true
+            docker ps -a | grep pegasus-nginx && docker rm -f pegasus-nginx || true
+            
+            # Clean up networks
+            docker network ls | grep pegasus-network && docker network rm pegasus-nest_pegasus-network || true
+            docker network prune -f
           fi
-
+          
           # Move new deployment to production directory
           rm -rf /opt/pegasus-nest-backup
           if [ -d /opt/pegasus-nest ]; then
             mv /opt/pegasus-nest /opt/pegasus-nest-backup
           fi
           mv /opt/pegasus-nest-temp /opt/pegasus-nest
-
+          
           cd /opt/pegasus-nest
 
           # Fix potential Node.js installation issues before running the deployment script
