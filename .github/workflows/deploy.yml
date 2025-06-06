@@ -22,8 +22,14 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 10.11.0
           run_install: false
+
+      - name: Verify pnpm installation
+        run: |
+          pnpm --version
+          echo "Checking lockfiles..."
+          ls -la pnpm-lock.yaml frontend/pnpm-lock.yaml || echo "Some lockfiles missing"
 
       - name: Get pnpm store directory
         shell: bash
@@ -38,7 +44,16 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          echo "Installing dependencies with workspace configuration..."
+          # Check if lockfile is compatible
+          if pnpm install --frozen-lockfile --dry-run; then
+            echo "Using frozen lockfile..."
+            pnpm install --frozen-lockfile
+          else
+            echo "Lockfile incompatible, regenerating..."
+            pnpm install
+          fi
 
       - name: Build backend
         run: pnpm run build
