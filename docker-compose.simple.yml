@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # Backend API Service
   pegasus-nest:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     container_name: pegasus-nest-api
@@ -39,7 +39,7 @@ services:
     container_name: pegasus-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - '80:80'
     volumes:
       - ./nginx-production.conf:/etc/nginx/nginx.conf:ro
     networks:

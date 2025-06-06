@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
-    "build:frontend": "cd frontend && pnpm build",
+    "build:frontend": "pnpm --filter frontend run build",
     "build:all": "pnpm run build:frontend && pnpm run build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "node dist/main",

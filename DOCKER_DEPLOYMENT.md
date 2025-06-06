@@ -5,6 +5,7 @@ This guide covers deploying the complete Pegasus Nest application (NestJS backen
 ## 🚀 Quick Start
 
 ### Local Deployment
+
 ```powershell
 # Deploy locally with Docker
 .\local-deploy.ps1
@@ -17,6 +18,7 @@ This guide covers deploying the complete Pegasus Nest application (NestJS backen
 ```
 
 ### VPS Deployment
+
 ```powershell
 # Deploy to VPS (37.114.41.124)
 .\vps-deploy.ps1
@@ -34,10 +36,12 @@ This guide covers deploying the complete Pegasus Nest application (NestJS backen
 ## 📋 Prerequisites
 
 ### For Local Deployment
+
 - Docker Desktop installed and running
 - PowerShell (Windows) or Bash (Linux/macOS)
 
 ### For VPS Deployment
+
 - SSH access to your VPS (key-based authentication recommended)
 - VPS running Linux (Ubuntu/Debian/CentOS)
 - SSH client installed locally
@@ -47,11 +51,13 @@ This guide covers deploying the complete Pegasus Nest application (NestJS backen
 The deployment includes:
 
 1. **Backend Service** (`pegasus-nest`)
+
    - NestJS API server
    - Port: 3000 (internal)
    - Health check: `/health`
 
 2. **Frontend Service** (`pegasus-frontend`)
+
    - Next.js application
    - Port: 3000 (internal)
    - Standalone build for optimal performance
@@ -66,6 +72,7 @@ The deployment includes:
 ### Environment Variables
 
 **Backend (.env.production):**
+
 ```bash
 NODE_ENV=production
 OPENROUTER_API_KEY=your_key_here
@@ -75,6 +82,7 @@ JWT_SECRET=your_jwt_secret
 ```
 
 **Frontend (frontend/.env.production):**
+
 ```bash
 NODE_ENV=production
 NEXT_PUBLIC_API_URL=http://37.114.41.124/api
@@ -97,6 +105,7 @@ NEXTAUTH_URL=http://37.114.41.124
 ## 🛠️ Manual Commands
 
 ### Build and Run Locally
+
 ```powershell
 # Using production compose file
 docker compose -f docker-compose.prod.yml up --build -d
@@ -112,6 +121,7 @@ docker compose -f docker-compose.prod.yml down
 ```
 
 ### VPS Manual Deployment
+
 ```bash
 # On VPS, create app directory
 mkdir -p /opt/pegasus-nest
@@ -132,11 +142,13 @@ The deployment includes built-in health checks:
 ## 📊 Monitoring
 
 ### View Container Status
+
 ```powershell
 docker compose -f docker-compose.prod.yml ps
 ```
 
 ### View Logs
+
 ```powershell
 # All services
 docker compose -f docker-compose.prod.yml logs -f
@@ -148,6 +160,7 @@ docker compose -f docker-compose.prod.yml logs -f nginx
 ```
 
 ### Resource Usage
+
 ```powershell
 docker stats
 ```
@@ -155,6 +168,7 @@ docker stats
 ## 🔄 Updates and Maintenance
 
 ### Update Application
+
 ```powershell
 # Local
 .\local-deploy.ps1 -Force
@@ -164,11 +178,13 @@ docker stats
 ```
 
 ### Restart Services
+
 ```powershell
 docker compose -f docker-compose.prod.yml restart
 ```
 
 ### View Container Details
+
 ```powershell
 docker compose -f docker-compose.prod.yml exec pegasus-nest bash
 docker compose -f docker-compose.prod.yml exec pegasus-frontend sh
@@ -179,21 +195,27 @@ docker compose -f docker-compose.prod.yml exec pegasus-frontend sh
 ### Common Issues
 
 1. **Docker not running**
+
    ```
    Error: Cannot connect to the Docker daemon
    ```
+
    Solution: Start Docker Desktop
 
 2. **Port already in use**
+
    ```
    Error: Port 80 is already allocated
    ```
+
    Solution: Stop other services or change ports in docker-compose.prod.yml
 
 3. **SSH connection failed (VPS)**
+
    ```
    Error: SSH connection failed
    ```
+
    Solution: Ensure SSH key is set up and VPS is accessible
 
 4. **Health check failed**
@@ -223,11 +245,13 @@ curl http://localhost/api/health
 ## 🚪 URLs After Deployment
 
 **Local:**
+
 - Application: http://localhost
 - API: http://localhost/api
 - Health: http://localhost/health
 
 **VPS (37.114.41.124):**
+
 - Application: http://37.114.41.124
 - API: http://37.114.41.124/api
 - Health: http://37.114.41.124/health

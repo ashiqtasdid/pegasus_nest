@@ -5,9 +5,10 @@ const nextConfig = {
     return [
       {
         source: '/api/proxy/:path*',
-        destination: process.env.NODE_ENV === 'production' 
-          ? 'http://pegasus-nest-backend:3000/:path*' 
-          : 'http://localhost:3000/:path*',
+        destination:
+          process.env.NODE_ENV === 'production'
+            ? 'http://pegasus-nest-backend:3000/:path*'
+            : 'http://localhost:3000/:path*',
       },
     ];
   },
