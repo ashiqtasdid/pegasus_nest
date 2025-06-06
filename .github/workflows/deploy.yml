@@ -84,6 +84,34 @@ jobs:
         run: |
           ssh root@37.114.41.124 "mkdir -p /opt/pegasus-nest-temp"
 
+      - name: Create environment files on VPS first
+        run: |
+          ssh root@37.114.41.124 'bash -s' << 'EOF'
+            cd /opt/pegasus-nest-temp
+            
+            # Create main .env file for backend
+            cat > .env << 'ENVEOF'
+NODE_ENV=production
+OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
+PORT=3000
+ENVEOF
+            
+            # Create frontend .env.local file with Better Auth variables
+            mkdir -p frontend
+            cat > frontend/.env.local << 'FRONTENDEOF'
+NODE_ENV=production
+NEXT_PUBLIC_API_URL=http://37.114.41.124
+MONGODB_URL=${{ secrets.MONGODB_URL }}
+GITHUB_CLIENT_ID=${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
+GITHUB_CLIENT_SECRET=${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}
+BETTER_AUTH_URL=http://37.114.41.124
+FRONTENDEOF
+            
+            # Create necessary directories
+            mkdir -p generated logs
+EOF
+
       - name: Copy files to VPS
         run: |
           rsync -avz --exclude-from='.gitignore' \
@@ -98,37 +126,32 @@ jobs:
             --exclude='generated' \
             ./ root@37.114.41.124:/opt/pegasus-nest-temp/
 
-      - name: Create environment files on VPS
+      - name: Verify environment files on VPS
         run: |
-          ssh root@37.114.41.124 << 'EOF'
+          ssh root@37.114.41.124 'bash -s' << 'EOF'
             cd /opt/pegasus-nest-temp
             
-            # Create main .env file for backend
-            cat > .env << EOL
-            NODE_ENV=production
-            OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
-            PORT=3000
-            EOL
+            # Verify environment files exist and have content
+            if [ ! -f .env ] || [ ! -s .env ]; then
+              echo "ERROR: .env file is missing or empty"
+              exit 1
+            fi
             
-            # Create frontend .env.local file with Better Auth variables
-            mkdir -p frontend
-            cat > frontend/.env.local << EOL
-            NODE_ENV=production
-            NEXT_PUBLIC_API_URL=http://37.114.41.124
-            MONGODB_URL=${{ secrets.MONGODB_URL }}
-            GITHUB_CLIENT_ID=${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
-            GITHUB_CLIENT_SECRET=${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
-            BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}
-            BETTER_AUTH_URL=http://37.114.41.124
-            EOL
+            if [ ! -f frontend/.env.local ] || [ ! -s frontend/.env.local ]; then
+              echo "ERROR: frontend/.env.local file is missing or empty"
+              exit 1
+            fi
             
-            # Create necessary directories
-            mkdir -p generated logs
-          EOF
+            echo "✅ Environment files verified"
+            echo "Backend env variables:"
+            grep -v "API_KEY" .env || echo "No API_KEY found"
+            echo "Frontend env variables:"
+            grep -v "SECRET\|CLIENT_SECRET\|MONGODB_URL" frontend/.env.local || echo "Sensitive vars present"
+EOF
 
       - name: Deploy application
         run: |
-          ssh root@37.114.41.124 << 'EOF'
+          ssh root@37.114.41.124 'bash -s' << 'EOF'
             cd /opt/pegasus-nest-temp
             
             # Stop existing services if running
@@ -151,7 +174,7 @@ jobs:
             
             # Deploy
             ./deploy-vps.sh
-          EOF
+EOF
 
       - name: Verify deployment
         run: |
@@ -161,10 +184,10 @@ jobs:
       - name: Cleanup on failure
         if: failure()
         run: |
-          ssh root@37.114.41.124 << 'EOF'
+          ssh root@37.114.41.124 'bash -s' << 'EOF'
             # Restore backup if deployment failed
             if [ -d /opt/pegasus-nest-backup ]; then
               cd /opt/pegasus-nest-backup
               docker-compose -f docker-compose.simple.yml up -d || true
             fi
-          EOF
+EOF

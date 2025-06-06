@@ -1,5 +1,5 @@
 # Backend Dockerfile
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Create app directory
 WORKDIR /app
@@ -8,7 +8,7 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++ curl openjdk17 maven
 
 # Install pnpm
-RUN npm install -g pnpm
+RUN npm install -g pnpm@8.15.8
 
 # Copy package files
 COPY package.json pnpm-lock.yaml ./
