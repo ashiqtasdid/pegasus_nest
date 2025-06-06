@@ -169,11 +169,18 @@ jobs:
           
           cd /opt/pegasus-nest
           
-          # Make deployment script executable
-          chmod +x deploy-vps.sh
-          
-          # Deploy
-          ./deploy-vps.sh
+          # Fix potential Node.js installation issues before running the deployment script
+          if [ -f /opt/pegasus-nest/fix-nodejs-conflict.sh ]; then
+            echo "Running Node.js installation fix script..."
+            chmod +x fix-nodejs-conflict.sh
+            ./fix-nodejs-conflict.sh
+          else
+            # Make deployment script executable
+            chmod +x deploy-vps.sh
+            
+            # Deploy
+            ./deploy-vps.sh
+          fi
           EOF
 
       - name: Verify deployment
