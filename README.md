@@ -76,19 +76,35 @@ Pegasus Nest API is a NestJS-based backend service designed to leverage AI capab
 
 ### VPS Deployment
 
-**Note**: Automatic deployment via GitHub Actions has been disabled. Use manual deployment instead.
+**Note**: All deployment is manual and Docker-based. Automatic deployment is disabled.
 
-#### Quick Deploy (Recommended)
+#### Docker-Based GitHub Deployment (Recommended)
 
-```bash
-# Setup environment (first time only)
-./setup-env.sh
+1. Setup environment (first time only):
 
-# Deploy to VPS
-./quick-deploy.sh
-```
+   ```bash
+   ./setup-env.sh
+   ```
 
-#### Manual Deploy Steps
+2. Push code to GitHub:
+
+   ```bash
+   git add .
+   git commit -m "Deploy update"
+   git push origin main
+   ```
+
+3. Deploy on VPS:
+   ```bash
+   ssh root@37.114.41.124
+   cd /opt/pegasus-nest
+   git pull origin main
+   ./deploy-docker.sh
+   ```
+
+#### Alternative: Direct Copy Deploy
+
+For immediate deployment without Git commit:
 
 1. Setup environment:
 
@@ -96,21 +112,12 @@ Pegasus Nest API is a NestJS-based backend service designed to leverage AI capab
    ./setup-env.sh
    ```
 
-2. Copy files to VPS:
-
+2. Deploy using the legacy wrapper:
    ```bash
-   rsync -avz ./ root@37.114.41.124:/opt/pegasus-nest/
-   ```
-
-3. SSH and deploy:
-   ```bash
-   ssh root@37.114.41.124
-   cd /opt/pegasus-nest
-   chmod +x *.sh
    ./deploy-vps.sh
    ```
 
-See `MANUAL_DEPLOYMENT.md` for detailed instructions.
+This method automatically syncs files and deploys with Docker.
 
 ## API Documentation
 

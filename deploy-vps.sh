@@ -3,85 +3,8 @@
 # VPS Deployment Script for Pegasus Nest API
 echo "🚀 Starting Pegasus Nest API deployment on VPS..."
 
-# Exit on any error
-set -e
-
-# Disable Docker BuildKit to avoid buildx issues
-export DOCKER_BUILDKIT=0
-export COMPOSE_DOCKER_CLI_BUILD=0
-
-# Function to log with timestamp
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
-
-# Function to check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Function to ensure Docker buildx is available or BuildKit is properly disabled
-ensure_docker_build_compatibility() {
-    log "Ensuring Docker build compatibility..."
-    
-    # Check if docker buildx is available
-    if docker buildx version &>/dev/null; then
-        log "Docker buildx is available"
-        return 0
-    fi
-    
-    log "Docker buildx not found, trying to install it..."
-    
-    # Try to install Docker buildx first
-    if command_exists apt-get; then
-        apt-get update -qq
-        apt-get install -y docker-buildx-plugin 2>/dev/null || {
-            log "Failed to install docker-buildx-plugin, disabling BuildKit instead..."
-            
-            # Install jq if not available for JSON manipulation
-            apt-get install -y jq 2>/dev/null || {
-                log "WARNING: jq not available, using manual JSON editing..."
-                # Fallback: manually disable BuildKit
-                echo '{"features": {"buildkit": false}}' > /etc/docker/daemon.json
-                systemctl restart docker
-                sleep 5
-                return 0
-            }
-            
-            # Create or update Docker daemon configuration to disable BuildKit
-            if [ ! -f /etc/docker/daemon.json ]; then
-                echo '{"features": {"buildkit": false}}' > /etc/docker/daemon.json
-                log "Created /etc/docker/daemon.json with BuildKit disabled"
-            else
-                # Check if BuildKit is already configured
-                if ! grep -q '"buildkit"' /etc/docker/daemon.json; then
-                    # Add buildkit config to existing daemon.json
-                    jq '. + {"features": {"buildkit": false}}' /etc/docker/daemon.json > /tmp/daemon.json.tmp
-                    mv /tmp/daemon.json.tmp /etc/docker/daemon.json
-                    log "Updated /etc/docker/daemon.json to disable BuildKit"
-                fi
-            fi
-            
-            # Restart Docker daemon to apply changes
-            log "Restarting Docker daemon..."
-            systemctl restart docker
-            sleep 5
-        }
-    fi
-    
-    # Verify Docker is running
-    docker version --format '{{.Server.Version}}' || {
-        log "ERROR: Docker failed to restart properly"
-        exit 1
-    }
-    
-    # Check again if buildx is now available
-    if docker buildx version &>/dev/null; then
-        log "Docker buildx is now available"
-    else
-        log "BuildKit disabled, using legacy Docker build"
-    fi
-}
+# This script is now a wrapper for the Docker-based deployment
+./deploy-docker.sh
 
 # Stop existing containers
 log "Stopping existing containers..."
