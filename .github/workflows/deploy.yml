@@ -1,4 +1,4 @@
-name: Deploy Pegasus Nest API
+name: Build and Test Pegasus Nest API
 
 on:
   push:
@@ -61,122 +61,8 @@ jobs:
         run: pnpm run test || echo "No tests configured"
         continue-on-error: true
 
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
-
-      - name: Add VPS to known hosts
-        run: |
-          ssh-keyscan -H 37.114.41.124 >> ~/.ssh/known_hosts
-
-      - name: Create deployment directory on VPS
-        run: |
-          ssh root@37.114.41.124 "mkdir -p /opt/pegasus-nest-temp"
-
-      - name: Create environment files on VPS
-        run: |
-          ssh root@37.114.41.124 << 'EOF'
-          cd /opt/pegasus-nest-temp
-
-          # Create .env file for API
-          cat > .env << ENVEOF
-          NODE_ENV=production
-          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
-          PORT=3000
-          ENVEOF
-
-          # Create necessary directories
-          mkdir -p generated logs
-          EOF
-
-      - name: Copy files to VPS
-        run: |
-          rsync -avz --exclude-from='.gitignore' \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='dist' \
-            --exclude='build' \
-            --exclude='logs' \
-            --exclude='generated' \
-            ./ root@37.114.41.124:/opt/pegasus-nest-temp/
-
-      - name: Verify environment files on VPS
-        run: |
-          ssh root@37.114.41.124 << 'EOF'
-          cd /opt/pegasus-nest-temp
-
-          # Verify environment file exists and has content
-          if [ ! -f .env ] || [ ! -s .env ]; then
-            echo "ERROR: .env file is missing or empty"
-            exit 1
-          fi
-
-          echo "✅ Environment file verified"
-          echo "API env variables:"
-          grep -v "API_KEY" .env || echo "API_KEY configured"
-          EOF
-
-      - name: Deploy application
-        run: |
-          ssh root@37.114.41.124 << 'EOF'
-          cd /opt/pegasus-nest-temp
-
-          # Stop existing services if running
-          if [ -f /opt/pegasus-nest/docker-compose.yml ]; then
-            cd /opt/pegasus-nest
-            docker-compose down || true
-            
-            # Clean up any orphaned containers
-            docker ps -a | grep pegasus-nest-api && docker rm -f pegasus-nest-api || true
-            
-            # Clean up networks
-            docker network ls | grep pegasus-network && docker network rm pegasus-nest_pegasus-network || true
-            docker network prune -f
-          fi
-
-          # Move new deployment to production directory
-          rm -rf /opt/pegasus-nest-backup
-          if [ -d /opt/pegasus-nest ]; then
-            mv /opt/pegasus-nest /opt/pegasus-nest-backup
-          fi
-          mv /opt/pegasus-nest-temp /opt/pegasus-nest
-
-          cd /opt/pegasus-nest
-
-          # Fix potential Node.js installation issues before deployment
-          if [ -f /opt/pegasus-nest/fix-nodejs-conflict.sh ]; then
-            echo "Running Node.js installation fix script..."
-            chmod +x fix-nodejs-conflict.sh
-            ./fix-nodejs-conflict.sh
-          fi
-
-          # Make deployment script executable and deploy
-          chmod +x deploy-vps.sh
-          ./deploy-vps.sh
-          EOF
-
-      - name: Verify deployment
-        run: |
-          sleep 30
-          curl -f http://37.114.41.124:3000/health || exit 1
-
-      - name: Cleanup on failure
-        if: failure()
-        run: |
-          ssh root@37.114.41.124 << 'EOF'
-          # Restore backup if deployment failed
-          if [ -d /opt/pegasus-nest-backup ]; then
-            cd /opt/pegasus-nest-backup
-            docker-compose up -d || true
-          fi
-          EOF
+  # Automatic deployment has been disabled
+  # To deploy manually, run the deployment scripts on the VPS:
+  # 1. Copy files to VPS: rsync -avz ./ root@37.114.41.124:/opt/pegasus-nest/
+  # 2. SSH to VPS: ssh root@37.114.41.124
+  # 3. Run deployment: cd /opt/pegasus-nest && ./deploy-vps.sh

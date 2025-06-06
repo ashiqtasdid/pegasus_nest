@@ -21,7 +21,7 @@ Pegasus Nest API is a NestJS-based backend service designed to leverage AI capab
 - **AI**: Google Gemini API
 - **Java Compilation**: JDK 17, Maven
 - **Containerization**: Docker and Docker Compose
-- **Deployment**: CI/CD with GitHub Actions
+- **Deployment**: Manual deployment with automated scripts
 
 ## Getting Started
 
@@ -73,6 +73,44 @@ Pegasus Nest API is a NestJS-based backend service designed to leverage AI capab
    ```
 
 2. The API will be available at http://localhost:3000
+
+### VPS Deployment
+
+**Note**: Automatic deployment via GitHub Actions has been disabled. Use manual deployment instead.
+
+#### Quick Deploy (Recommended)
+
+```bash
+# Setup environment (first time only)
+./setup-env.sh
+
+# Deploy to VPS
+./quick-deploy.sh
+```
+
+#### Manual Deploy Steps
+
+1. Setup environment:
+
+   ```bash
+   ./setup-env.sh
+   ```
+
+2. Copy files to VPS:
+
+   ```bash
+   rsync -avz ./ root@37.114.41.124:/opt/pegasus-nest/
+   ```
+
+3. SSH and deploy:
+   ```bash
+   ssh root@37.114.41.124
+   cd /opt/pegasus-nest
+   chmod +x *.sh
+   ./deploy-vps.sh
+   ```
+
+See `MANUAL_DEPLOYMENT.md` for detailed instructions.
 
 ## API Documentation
 
