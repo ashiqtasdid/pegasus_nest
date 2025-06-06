@@ -13,6 +13,15 @@ Go to your GitHub repository → Settings → Secrets and variables → Actions,
 - **`VPS_SSH_KEY`**: Your private SSH key for VPS access
 - **`OPENROUTER_API_KEY`**: Your OpenRouter API key
 
+#### Better Auth Secrets (Required for Frontend Authentication):
+
+- **`MONGODB_URL`**: MongoDB Atlas connection string
+- **`OAUTH_GITHUB_CLIENT_ID`**: GitHub OAuth application client ID
+- **`OAUTH_GITHUB_CLIENT_SECRET`**: GitHub OAuth application client secret
+- **`BETTER_AUTH_SECRET`**: JWT signing secret (32+ characters)
+
+📋 **For detailed setup instructions, see [BETTER_AUTH_SETUP.md](./BETTER_AUTH_SETUP.md)**
+
 ### 2. Generate SSH Key for GitHub Actions
 
 On your local machine or VPS, generate a new SSH key:

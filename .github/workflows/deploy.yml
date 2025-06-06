@@ -106,18 +106,23 @@ jobs:
           ssh root@37.114.41.124 << 'EOF'
             cd /opt/pegasus-nest-temp
             
-            # Create main .env file
+            # Create main .env file for backend
             cat > .env << EOL
             NODE_ENV=production
             OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
             PORT=3000
             EOL
             
-            # Create frontend .env.production file
+            # Create frontend .env.local file with Better Auth variables
             mkdir -p frontend
-            cat > frontend/.env.production << EOL
+            cat > frontend/.env.local << EOL
             NODE_ENV=production
             NEXT_PUBLIC_API_URL=http://37.114.41.124
+            MONGODB_URL=${{ secrets.MONGODB_URL }}
+            GITHUB_CLIENT_ID=${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
+            GITHUB_CLIENT_SECRET=${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+            BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}
+            BETTER_AUTH_URL=http://37.114.41.124
             EOL
             
             # Create necessary directories
