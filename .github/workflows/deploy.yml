@@ -90,7 +90,7 @@ jobs:
           cd /opt/pegasus-nest-temp
 
           # Create main .env file for backend
-          cat > .env << 'ENVEOF'
+          cat > .env << ENVEOF
           NODE_ENV=production
           OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
           PORT=3000
@@ -98,7 +98,7 @@ jobs:
 
           # Create frontend .env.local file with Better Auth variables
           mkdir -p frontend
-          cat > frontend/.env.local << 'FRONTENDEOF'
+          cat > frontend/.env.local << FRONTENDEOF
           NODE_ENV=production
           NEXT_PUBLIC_API_URL=http://37.114.41.124
           MONGODB_URL=${{ secrets.MONGODB_URL }}
@@ -147,6 +147,20 @@ jobs:
           grep -v "API_KEY" .env || echo "No API_KEY found"
           echo "Frontend env variables:"
           grep -v "SECRET\|CLIENT_SECRET\|MONGODB_URL" frontend/.env.local || echo "Sensitive vars present"
+          
+          # Verify GitHub OAuth configuration
+          if grep -q "GITHUB_CLIENT_ID=" frontend/.env.local && grep -q "GITHUB_CLIENT_SECRET=" frontend/.env.local; then
+            GITHUB_CLIENT_ID=$(grep "GITHUB_CLIENT_ID=" frontend/.env.local | cut -d '=' -f2)
+            GITHUB_CLIENT_SECRET=$(grep "GITHUB_CLIENT_SECRET=" frontend/.env.local | cut -d '=' -f2)
+            
+            if [ "$GITHUB_CLIENT_ID" = "placeholder" ] || [ "$GITHUB_CLIENT_SECRET" = "placeholder" ] || [ -z "$GITHUB_CLIENT_ID" ] || [ -z "$GITHUB_CLIENT_SECRET" ]; then
+              echo "⚠️ WARNING: GitHub OAuth credentials are set to placeholder values or empty"
+            else
+              echo "✅ GitHub OAuth credentials appear to be properly configured"
+            fi
+          else
+            echo "⚠️ WARNING: GitHub OAuth environment variables missing from frontend/.env.local"
+          fi
           EOF
 
       - name: Deploy application

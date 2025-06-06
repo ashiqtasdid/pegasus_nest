@@ -34,6 +34,10 @@ RUN if [ ! -f .env.local ]; then \
 # Build the application
 RUN pnpm run build
 
+# Create verification script for auth environment
+COPY scripts/verify-auth-env.sh ./verify-auth-env.sh
+RUN chmod +x ./verify-auth-env.sh
+
 # Production stage
 FROM node:20-alpine AS runner
 WORKDIR /app
@@ -50,6 +54,10 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
+# Copy verification script to the final image
+COPY --from=builder /app/verify-auth-env.sh ./verify-auth-env.sh
+RUN chmod +x ./verify-auth-env.sh
+
 # Set ownership
 RUN chown -R nextjs:nodejs /app
 USER nextjs
@@ -59,4 +67,5 @@ EXPOSE 3000
 ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
 
-CMD ["node", "server.js"]
+# Run verification script and then start the server
+CMD ["/bin/sh", "-c", "./verify-auth-env.sh && node server.js"]

@@ -88,6 +88,39 @@ if ! grep -q "MONGODB_URL" frontend/.env.local; then
 fi
 
 # Pull latest base images
+# Ensure environment variables are loaded
+log "Loading environment variables..."
+if [ -f .env ]; then
+    log "Loading variables from .env file"
+    export $(grep -v '^#' .env | xargs)
+else
+    log "WARNING: .env file not found, using existing environment variables"
+fi
+
+# Verify critical environment variables for auth
+if [ -z "$GITHUB_CLIENT_ID" ] || [ -z "$GITHUB_CLIENT_SECRET" ] || [ -z "$BETTER_AUTH_SECRET" ]; then
+    log "WARNING: Some authentication environment variables are missing"
+    log "Checking frontend/.env.local file for values..."
+    
+    if [ -f frontend/.env.local ]; then
+        # Extract variables from frontend/.env.local if available
+        GITHUB_CLIENT_ID=$(grep GITHUB_CLIENT_ID frontend/.env.local | cut -d= -f2)
+        GITHUB_CLIENT_SECRET=$(grep GITHUB_CLIENT_SECRET frontend/.env.local | cut -d= -f2)
+        BETTER_AUTH_SECRET=$(grep BETTER_AUTH_SECRET frontend/.env.local | cut -d= -f2)
+        MONGODB_URL=$(grep MONGODB_URL frontend/.env.local | cut -d= -f2)
+        
+        # Export them to make them available to Docker Compose
+        export GITHUB_CLIENT_ID
+        export GITHUB_CLIENT_SECRET
+        export BETTER_AUTH_SECRET
+        export MONGODB_URL
+        
+        log "Loaded auth environment variables from frontend/.env.local"
+    else
+        log "WARNING: frontend/.env.local file not found. Auth may not work correctly."
+    fi
+fi
+
 log "Pulling base images..."
 docker pull node:20-alpine
 docker pull nginx:alpine
