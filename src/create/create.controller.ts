@@ -1388,22 +1388,34 @@ IMPORTANT: Implement ALL features, commands, and event handlers specified in the
     @Body() chatData: ChatRequestDto,
   ): Promise<{ success: boolean; response?: string; error?: string }> {
     try {
+      // Debug logging - log the entire request body structure
+      console.log('Raw chat request body:', JSON.stringify(chatData, null, 2));
+      console.log('chatData.pluginName:', chatData.pluginName);
+      console.log('chatData.name:', (chatData as any).name);
+
+      // Handle both pluginName and name parameters for compatibility
+      const pluginName = chatData.pluginName || (chatData as any).name;
+
       // Validate required parameters
-      if (!chatData.pluginName) {
+      if (!pluginName) {
+        console.error(
+          'Plugin name validation failed - both pluginName and name are missing',
+        );
         return {
           success: false,
-          error: 'Plugin name is required',
+          error:
+            'Plugin name is required. Please provide either pluginName or name parameter.',
         };
       }
 
       console.log(
-        `Chat request received for plugin: ${chatData.pluginName}, message: ${chatData.message}`,
+        `Chat request received for plugin: ${pluginName}, message: ${chatData.message}`,
       );
 
       const response =
         await this.pluginChatService.getChatResponseWithRefinement(
           chatData.message,
-          chatData.pluginName,
+          pluginName,
         );
 
       return {
@@ -1419,6 +1431,4 @@ IMPORTANT: Implement ALL features, commands, and event handlers specified in the
       };
     }
   }
-
-
 }
