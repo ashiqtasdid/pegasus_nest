@@ -23,6 +23,7 @@ docker-compose -f docker-compose.simple.yml down 2>/dev/null || true
 # Clean up any orphaned containers with the same name
 log "Cleaning up any orphaned containers..."
 docker ps -a | grep pegasus-nest-api && docker rm -f pegasus-nest-api || true
+docker ps -a | grep pegasus-nest-frontend && docker rm -f pegasus-nest-frontend || true
 docker ps -a | grep pegasus-ui && docker rm -f pegasus-ui || true
 docker ps -a | grep pegasus-nginx && docker rm -f pegasus-nginx || true
 
