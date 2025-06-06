@@ -1387,14 +1387,22 @@ IMPORTANT: Implement ALL features, commands, and event handlers specified in the
     @Body() chatData: ChatRequestDto,
   ): Promise<{ success: boolean; response?: string; error?: string }> {
     try {
+      // Validate required parameters
+      if (!chatData.pluginName) {
+        return {
+          success: false,
+          error: 'Plugin name is required',
+        };
+      }
+
       console.log(
-        `Chat request received for plugin: ${chatData.name}, message: ${chatData.message}`,
+        `Chat request received for plugin: ${chatData.pluginName}, message: ${chatData.message}`,
       );
 
       const response =
         await this.pluginChatService.getChatResponseWithRefinement(
           chatData.message,
-          chatData.name,
+          chatData.pluginName,
         );
 
       return {
