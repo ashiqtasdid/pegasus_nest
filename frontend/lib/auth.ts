@@ -42,12 +42,11 @@ export const auth = betterAuth({
     enabled: true,
     requireEmailVerification: false, // Set to true if you want email verification
   },
-
   // Configure providers
   providers: [
     github({
-      clientId: process.env.GITHUB_CLIENT_ID!,
-      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+      clientId: process.env.GITHUB_CLIENT_ID || '',
+      clientSecret: process.env.GITHUB_CLIENT_SECRET || '',
     }),
   ],
 
@@ -64,4 +63,7 @@ export const auth = betterAuth({
 });
 
 // Debug logging
-console.log('✅ Better Auth configured with providers:', auth.options?.providers?.map(p => p.id) || 'none');
+console.log(
+  '✅ Better Auth configured with providers:',
+  auth.options?.providers?.map((p) => p.id) || 'none',
+);

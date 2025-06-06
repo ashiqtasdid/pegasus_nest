@@ -9,7 +9,10 @@
     "lint": "next lint",
     "db:init": "node scripts/init-db.js",
     "db:test": "node scripts/test-mongodb.js",
-    "db:setup": "node scripts/init-mongodb.js"
+    "db:setup": "node scripts/init-mongodb.js",
+    "check:oauth": "node scripts/check-github-oauth-env.js",
+    "test:oauth": "node scripts/test-github-oauth.js",
+    "verify:oauth": "node scripts/verify-github-oauth.js"
   },
   "dependencies": {
     "@auth/core": "^0.39.1",

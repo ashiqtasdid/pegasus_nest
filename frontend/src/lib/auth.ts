@@ -41,13 +41,13 @@ export const auth = betterAuth({
     requireEmailVerification: false, // Set to true if you want email verification
   },
 
-  // Configure social providers
-  socialProviders: {
-    github: {
+  // Configure providers for GitHub OAuth
+  providers: [
+    github({
       clientId: process.env.GITHUB_CLIENT_ID || '',
       clientSecret: process.env.GITHUB_CLIENT_SECRET || '',
-    },
-  },
+    }),
+  ],
 
   // Session configuration
   session: {
