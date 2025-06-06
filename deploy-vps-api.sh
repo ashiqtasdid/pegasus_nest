@@ -6,6 +6,9 @@ echo "🚀 Starting Pegasus Nest API deployment on VPS..."
 # Exit on any error
 set -e
 
+# Initialize variables
+COMPOSE_FILE=""
+
 # Function to log with timestamp
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -90,8 +93,43 @@ docker pull node:20-alpine
 
 # Build and start services
 log "Building and starting API service..."
-export DOCKER_BUILDKIT=1
-docker-compose up --build -d
+export DOCKER_BUILDKIT=0
+
+# Clean up any existing containers to avoid conflicts
+log "Cleaning up existing containers..."
+docker-compose down --remove-orphans 2>/dev/null || true
+
+# Remove any dangling images to save space
+log "Cleaning up dangling images..."
+docker image prune -f 2>/dev/null || true
+
+# Try building with pnpm first
+log "Attempting to build API container with pnpm..."
+if docker-compose up --build -d --force-recreate; then
+    log "SUCCESS: Container built with pnpm!"
+else
+    log "WARNING: pnpm build failed, trying with npm as fallback..."
+    
+    # Clean up failed attempt
+    docker-compose down --remove-orphans 2>/dev/null || true
+    
+    # Try with npm-based docker-compose
+    log "Building with npm fallback..."
+    if docker-compose -f docker-compose.npm.yml up --build -d --force-recreate; then
+        log "SUCCESS: Container built with npm fallback!"
+        # Update the check below to use the npm compose file
+        COMPOSE_FILE="-f docker-compose.npm.yml"
+    else
+        log "ERROR: Both pnpm and npm builds failed!"
+        log "Docker compose logs (pnpm):"
+        docker-compose logs 2>/dev/null || true
+        log "Docker compose logs (npm):"
+        docker-compose -f docker-compose.npm.yml logs 2>/dev/null || true
+        log "Docker system info:"
+        docker system df
+        exit 1
+    fi
+fi
 
 # Wait for services to be ready
 log "Waiting for API to start..."
@@ -101,7 +139,11 @@ sleep 30
 log "Checking container status..."
 if ! docker ps --format "table {{.Names}}\t{{.Status}}" | grep "pegasus-nest-api"; then
     log "ERROR: API container failed to start!"
-    docker-compose logs
+    if [ "${COMPOSE_FILE}" = "-f docker-compose.npm.yml" ]; then
+        docker-compose -f docker-compose.npm.yml logs
+    else
+        docker-compose logs
+    fi
     exit 1
 fi
 

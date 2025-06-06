@@ -1,0 +1,29 @@
+services:
+  # Backend API Service using npm
+  pegasus-nest-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.npm
+    container_name: pegasus-nest-api
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    networks:
+      - pegasus-network
+    volumes:
+      - ./generated:/app/generated
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - PORT=3000
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  pegasus-network:
+    driver: bridge
