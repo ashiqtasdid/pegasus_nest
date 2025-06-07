@@ -13,16 +13,27 @@ services:
     volumes:
       - ./generated:/app/generated:rw
       - ./logs:/app/logs:rw
+      - ./resources:/app/resources:ro
     environment:
       - NODE_ENV=production
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - PORT=3000
+      # Performance monitoring settings
+      - MEMORY_MONITORING_ENABLED=true
+      - PERFORMANCE_TRACKING_ENABLED=true
+      - DATABASE_POOLING_ENABLED=true
+      - STREAMING_ENABLED=true
+      # Memory limits and GC settings
+      - NODE_OPTIONS=--max-old-space-size=1024 --expose-gc
+      # Logging configuration
+      - LOG_LEVEL=warn
+      - STRUCTURED_LOGGING=true
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health/detailed']
       interval: 30s
-      timeout: 10s
+      timeout: 15s
       retries: 3
-      start_period: 40s
+      start_period: 60s
 
 networks:
   pegasus-network:

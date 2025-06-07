@@ -1,6 +1,7 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CreateController } from './create/create.controller';
@@ -12,6 +13,11 @@ import { CodeCompilerService } from './services/code-compiler.service';
 import { PluginOperationsService } from './services/plugin-operations.service';
 import { PluginChatService } from './services/plugin-chat.service';
 import { PromptRefinementService } from './services/prompt-refinement.service';
+import { MemoryMonitorService } from './services/memory-monitor.service';
+import { DatabasePoolService } from './services/database-pool.service';
+import { StreamingService } from './services/streaming.service';
+import { PerformanceTrackingService } from './services/performance-tracking.service';
+import { PerformanceMiddleware } from './middleware/performance.middleware';
 import { RobustnessService } from './common/robustness.service';
 import { ValidationService } from './common/validation.service';
 import { SecurityService } from './common/security.service';
@@ -26,6 +32,7 @@ import { ChatClassificationService } from './services/chat-classification.servic
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ScheduleModule.forRoot(),
     EventEmitterModule.forRoot({
       wildcard: false,
       delimiter: '.',
@@ -46,6 +53,10 @@ import { ChatClassificationService } from './services/chat-classification.servic
     PluginOperationsService,
     PluginChatService,
     PromptRefinementService,
+    MemoryMonitorService,
+    DatabasePoolService,
+    StreamingService,
+    PerformanceTrackingService,
     RobustnessService,
     ValidationService,
     SecurityService,
@@ -55,4 +66,8 @@ import { ChatClassificationService } from './services/chat-classification.servic
     ChatClassificationService,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(PerformanceMiddleware).forRoutes('*'); // Apply to all routes
+  }
+}

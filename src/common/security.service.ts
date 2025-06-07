@@ -70,7 +70,7 @@ export class SecurityService {
   /**
    * Get security middleware configuration
    */
-  getSecurityMiddleware() {
+  getSecurityMiddleware(): any {
     return {
       helmet: helmet({
         contentSecurityPolicy: {

@@ -40,52 +40,68 @@ export class PluginChatService {
   async getChatResponseWithRefinement(
     message: string,
     pluginName: string,
+    userId: string,
   ): Promise<string> {
     this.logger.log(
-      `Processing chat request for plugin: ${pluginName}, message: "${message.substring(0, 100)}..."`,
+      `Processing chat request for plugin: ${pluginName}, user: ${userId}, message: "${message.substring(0, 100)}..."`,
     );
 
     try {
-      // Check if plugin exists
-      const folderPath = path.join(process.cwd(), 'generated', pluginName);
+      // Check if plugin exists in user-specific directory
+      const folderPath = path.join(
+        process.cwd(),
+        'generated',
+        userId,
+        pluginName,
+      );
       this.logger.log(`Checking for plugin at path: ${folderPath}`);
-      
+
       if (!fs.existsSync(folderPath)) {
-        this.logger.warn(`Plugin "${pluginName}" not found at path: ${folderPath}`);
-        
-        // List available plugins for debugging
-        const generatedPath = path.join(process.cwd(), 'generated');
+        this.logger.warn(
+          `Plugin "${pluginName}" not found for user "${userId}" at path: ${folderPath}`,
+        );
+
+        // List available plugins for debugging - check user directory
+        const userGeneratedPath = path.join(process.cwd(), 'generated', userId);
         let availablePlugins = [];
         try {
-          if (fs.existsSync(generatedPath)) {
-            availablePlugins = fs.readdirSync(generatedPath).filter(item => {
-              const itemPath = path.join(generatedPath, item);
-              return fs.statSync(itemPath).isDirectory();
-            });
+          if (fs.existsSync(userGeneratedPath)) {
+            availablePlugins = fs
+              .readdirSync(userGeneratedPath)
+              .filter((item) => {
+                const itemPath = path.join(userGeneratedPath, item);
+                return fs.statSync(itemPath).isDirectory();
+              });
           }
         } catch (error) {
-          this.logger.error(`Error listing available plugins: ${error.message}`);
+          this.logger.error(
+            `Error listing available plugins for user ${userId}: ${error.message}`,
+          );
         }
-        
-        this.logger.log(`Available plugins: ${availablePlugins.join(', ') || 'None'}`);
-        
+
+        this.logger.log(
+          `Available plugins for user ${userId}: ${availablePlugins.join(', ') || 'None'}`,
+        );
+
         return `❌ **Plugin Not Found**
 
-The plugin "${pluginName}" doesn't exist in the system. Please ensure:
+The plugin "${pluginName}" doesn't exist for your account. Please ensure:
 
 1. The plugin name is spelled correctly
-2. The plugin has been generated previously
+2. The plugin has been generated previously under your account
 3. You're using the exact plugin name from the system
 
-**Available plugins:** ${availablePlugins.length > 0 ? availablePlugins.join(', ') : 'None found'}
+**Your available plugins:** ${availablePlugins.length > 0 ? availablePlugins.join(', ') : 'None found'}
 
 **Available actions:**
 • Generate a new plugin with this name
-• Check the list of existing plugins
+• Check the list of existing plugins for your account
 • Verify the plugin name spelling`;
       }
-      
-      this.logger.log(`Plugin "${pluginName}" found at path: ${folderPath}`);
+
+      this.logger.log(
+        `Plugin "${pluginName}" found for user "${userId}" at path: ${folderPath}`,
+      );
 
       // Step 1: Classify the user's intent using AI
       this.logger.log('Classifying user intent...');

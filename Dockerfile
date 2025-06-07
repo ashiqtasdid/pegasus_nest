@@ -10,8 +10,11 @@ RUN apk add --no-cache python3 make g++ curl openjdk17 maven
 # Install specific pnpm version compatible with lockfile v9.0
 RUN npm install -g pnpm@9.15.0
 
-# Verify pnpm installation
-RUN pnpm --version
+# Install PM2 globally for production process management
+RUN npm install -g pm2
+
+# Verify installations
+RUN pnpm --version && pm2 --version
 
 # Copy package files first (better layer caching)
 COPY package.json pnpm-lock.yaml ./
@@ -26,20 +29,23 @@ COPY . .
 RUN pnpm run build
 
 # Create directories for generated plugins and logs with proper permissions
-RUN mkdir -p /app/generated /app/logs
+RUN mkdir -p /app/generated /app/logs /app/resources
+
+# Copy ecosystem config for PM2
+COPY ecosystem.config.js ./
 
 # Change ownership to node user for security and ensure proper permissions
 RUN chown -R node:node /app && \
-    chmod -R 755 /app/generated /app/logs
+    chmod -R 755 /app/generated /app/logs /app/resources
 
 USER node
 
 # Expose the port the app runs on
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+# Health check - use comprehensive health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
 
-# Command to run the application
-CMD ["pnpm", "run", "start:prod"]
+# Command to run the application with PM2 in Docker mode
+CMD ["pm2-runtime", "start", "ecosystem.config.js", "--env", "production"]

@@ -1,19 +1,21 @@
 # Pegasus Nest API
 
-A powerful NestJS API for AI-powered Minecraft plugin generation.
+A powerful NestJS API for AI-powered Minecraft plugin generation with complete user isolation.
 
 ## Overview
 
-Pegasus Nest API is a NestJS-based backend service designed to leverage AI capabilities to generate, refine, and compile Minecraft plugins based on natural language descriptions. The system uses Google's Gemini AI to create Java code for Minecraft plugins, compile them, and provide feedback.
+Pegasus Nest API is a NestJS-based backend service designed to leverage AI capabilities to generate, refine, and compile Minecraft plugins based on natural language descriptions. The system features **complete user isolation**, ensuring each user's plugins are stored in dedicated directories with no cross-user access.
 
 ## Features
 
-- **AI-Powered Plugin Generation**: Create Minecraft plugins from natural language descriptions
-- **Code Compilation**: Automatically compile Java code into working Minecraft plugins
-- **Plugin Chat**: Interact with your plugin through chat to make modifications
-- **Prompt Refinement**: Improve prompts for better plugin generation
-- **Security**: Comprehensive security measures to protect your API
-- **Logging and Monitoring**: Track performance and diagnose issues easily
+- **🔐 User-Specific Plugin Generation**: Create Minecraft plugins with complete user isolation
+- **🤖 AI-Powered Development**: Uses Google's Gemini AI and other advanced models for intelligent code generation
+- **💬 Interactive Plugin Chat**: Modify your plugins through natural language conversations
+- **📁 Isolated File Management**: Each user's plugins are stored in separate directories (`generated/{userId}/`)
+- **⬇️ Secure Downloads**: Download only your own plugins with proper authentication
+- **🔒 Complete Security**: No cross-user data access or information leakage
+- **📊 User-Specific Listings**: See only your own plugins and data
+- **🛠️ Auto-Compilation**: Automatically compile Java code into working Minecraft plugins
 
 ## Technology Stack
 
@@ -121,11 +123,22 @@ This method automatically syncs files and deploys with Docker.
 
 ## API Documentation
 
-### Endpoints
+### User-Specific Endpoints
 
-- `POST /create/plugin`: Generate a new Minecraft plugin
-- `POST /create/chat`: Chat with the AI about your plugin for modifications
+All endpoints require user authentication and operate on user-specific data:
+
+- `POST /create/plugin`: Generate a new Minecraft plugin for authenticated user
+- `GET /create/plugins`: List all plugins for authenticated user
+- `GET /create/download/{pluginName}`: Download user's plugin (user-specific)
+- `POST /create/chat`: Chat with AI about user's plugin for modifications
 - `GET /health`: Health check endpoint
+
+### User Isolation Features
+
+- **Directory Structure**: `generated/{userId}/{pluginName}/`
+- **User-Specific Listings**: Users see only their own plugins
+- **Secure Downloads**: Download access restricted to plugin owners
+- **Isolated Chat**: Chat system works only with user's plugins
 
 ## Project Structure
 
@@ -138,9 +151,26 @@ src/
   ├── common/                  # Common utilities and services
   ├── controllers/             # API controllers
   ├── create/                  # Plugin creation functionality
+  │   └── create.controller.ts # User-specific plugin operations
   ├── health/                  # Health check functionality
   └── services/                # Core business logic services
+      └── plugin-chat.service.ts # User-specific chat service
+
+generated/                     # User-specific plugin storage
+  ├── {userId1}/
+  │   ├── {PluginName1}/
+  │   └── {PluginName2}/
+  ├── {userId2}/
+  │   └── {PluginName}/
+  └── ...
 ```
+
+## Documentation
+
+- **[Complete Architecture Guide](USER_SPECIFIC_PLUGIN_ARCHITECTURE.md)** - Detailed documentation of the user-specific plugin system
+- **[API Documentation](API_DOCUMENTATION.md)** - Comprehensive API reference
+- **[Chat System Documentation](CHAT_SYSTEM_DOCUMENTATION.md)** - Chat functionality details
+- **[Authentication System](COMPLETE_USER_SYSTEM_DOCUMENTATION.md)** - User management and authentication
 
 ## Contributing
 

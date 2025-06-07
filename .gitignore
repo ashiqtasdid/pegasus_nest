@@ -4,6 +4,8 @@
 /build
 /generated
 
+.old-scripts
+
 # Logs
 logs
 *.log

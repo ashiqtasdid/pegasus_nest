@@ -1,0 +1,99 @@
+services:
+  # Backend API Service with Performance Monitoring
+  pegasus-nest-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pegasus-nest-api
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    networks:
+      - pegasus-network
+    volumes:
+      - ./generated:/app/generated:rw
+      - ./logs:/app/logs:rw
+      - ./resources:/app/resources:ro
+      - ./data:/app/data:rw
+    environment:
+      - NODE_ENV=production
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - PORT=3000
+      # Performance monitoring settings
+      - MEMORY_MONITORING_ENABLED=true
+      - PERFORMANCE_TRACKING_ENABLED=true
+      - DATABASE_POOLING_ENABLED=true
+      - STREAMING_ENABLED=true
+      # Memory limits and GC settings
+      - NODE_OPTIONS=--max-old-space-size=1024 --expose-gc
+      # Logging configuration
+      - LOG_LEVEL=warn
+      - STRUCTURED_LOGGING=true
+      # Cache configuration
+      - CACHE_SIZE=1000
+      - CACHE_TTL=300000
+      # Rate limiting
+      - RATE_LIMIT_WINDOW=900000
+      - RATE_LIMIT_MAX=100
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health/detailed']
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    labels:
+      - 'app=pegasus-nest-api'
+      - 'environment=production'
+      - 'monitoring=enabled'
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # Optional: Performance monitoring dashboard (Grafana)
+  # Uncomment if you want to add monitoring dashboard
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: pegasus-grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - '3001:3000'
+  #   networks:
+  #     - pegasus-network
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin123
+  #   volumes:
+  #     - grafana-data:/var/lib/grafana
+
+  # Optional: Log aggregation with Loki
+  # Uncomment if you want centralized logging
+  # loki:
+  #   image: grafana/loki:latest
+  #   container_name: pegasus-loki
+  #   restart: unless-stopped
+  #   ports:
+  #     - '3100:3100'
+  #   networks:
+  #     - pegasus-network
+  #   volumes:
+  #     - loki-data:/loki
+
+networks:
+  pegasus-network:
+    driver: bridge
+    name: pegasus-network
+
+volumes:
+  # Uncomment if using optional monitoring services
+  # grafana-data:
+  #   driver: local
+  # loki-data:
+  #   driver: local
+  pegasus-logs:
+    driver: local
+  pegasus-data:
+    driver: local

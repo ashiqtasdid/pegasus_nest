@@ -28,6 +28,14 @@ import {
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { PluginChatService } from '../services/plugin-chat.service';
+import { StreamingService } from '../services/streaming.service';
+import { LRUCache } from 'lru-cache';
+
+// Performance optimization: LRU cache for plugin listings
+const pluginCache = new LRUCache<string, any>({
+  max: 100, // Maximum 100 cached items
+  ttl: 1000 * 60 * 15, // 15 minutes TTL
+});
 
 // Define return type for execPromise
 interface ExecResult {
@@ -92,6 +100,7 @@ export class CreateController {
     private readonly codeCompilerService: CodeCompilerService,
     private readonly pluginChatService: PluginChatService,
     private readonly promptRefinementService: PromptRefinementService,
+    private readonly streamingService: StreamingService,
   ) {}
   private logState(
     state: ProcessingState,
@@ -115,9 +124,32 @@ export class CreateController {
     let needsRecompilation = false;
 
     try {
-      // Get folder path for the requested plugin
+      // Validate userId
+      if (!createData.userId) {
+        throw new Error('User ID is required');
+      }
+
+      // Get folder path for the requested plugin with user-specific directory
       const folderName = createData.name;
-      const folderPath = path.join(process.cwd(), 'generated', folderName);
+      const userFolderPath = path.join(
+        process.cwd(),
+        'generated',
+        createData.userId,
+      );
+      const folderPath = path.join(userFolderPath, folderName);
+
+      // Create user directory if it doesn't exist
+      if (!fs.existsSync(path.join(process.cwd(), 'generated'))) {
+        fs.mkdirSync(path.join(process.cwd(), 'generated'));
+      }
+      if (!fs.existsSync(userFolderPath)) {
+        fs.mkdirSync(userFolderPath, { recursive: true });
+        this.logState(
+          state,
+          `Created user directory: ${createData.userId}`,
+          folderName,
+        );
+      }
 
       // Check if plugin directory already exists
       const pluginExists =
@@ -148,6 +180,14 @@ export class CreateController {
             `Maven build successful. Artifact: ${compilationResult.artifactPath}`,
             folderName,
           );
+
+          // Invalidate cache for this user since plugin was recompiled
+          const cacheKey = `plugins_${createData.userId}`;
+          pluginCache.delete(cacheKey);
+          console.log(
+            `Cache invalidated for user ${createData.userId} after plugin recompilation`,
+          );
+
           return `Existing project '${folderName}' recompiled successfully. Artifact: ${compilationResult.artifactPath}`;
         } else {
           state.status = 'failed';
@@ -162,13 +202,8 @@ export class CreateController {
       }
 
       // If we get here, the plugin doesn't exist - proceed with normal creation
-      // STEP 1: Create folder structure
-      state.status = 'processing';
+      // STEP 1: Create folder structure        state.status = 'processing';
       this.logState(state, 'Starting project creation', folderName);
-
-      if (!fs.existsSync(path.join(process.cwd(), 'generated'))) {
-        fs.mkdirSync(path.join(process.cwd(), 'generated'));
-      }
 
       fs.mkdirSync(folderPath, { recursive: true });
 
@@ -568,6 +603,13 @@ export class CreateController {
             state,
             `Maven build successful. Artifact: ${compilationResult.artifactPath}`,
             folderName,
+          );
+
+          // Invalidate cache for this user since a new plugin was created
+          const cacheKey = `plugins_${createData.userId}`;
+          pluginCache.delete(cacheKey);
+          console.log(
+            `Cache invalidated for user ${createData.userId} after successful plugin creation`,
           );
 
           return `Project created successfully at ${folderPath}. AI processing complete with ${actionsCount} file operations. JAR: ${compilationResult.artifactPath}`;
@@ -1291,42 +1333,94 @@ IMPORTANT: Implement ALL features, commands, and event handlers specified in the
   }
 
   @Get('plugins')
-  async listPlugins(): Promise<string[]> {
+  async listPlugins(
+    @Query('userId') userId?: string,
+  ): Promise<{ plugins: string[]; count: number; userId?: string }> {
     try {
-      const generatedPath = path.join(process.cwd(), 'generated');
-
-      if (!fs.existsSync(generatedPath)) {
-        return [];
+      if (!userId) {
+        // If no userId provided, return error or empty list
+        return {
+          plugins: [],
+          count: 0,
+          userId: undefined,
+        };
       }
 
-      const items = fs.readdirSync(generatedPath);
+      // Check cache first
+      const cacheKey = `plugins_${userId}`;
+      const cachedResult = pluginCache.get(cacheKey);
+      if (cachedResult) {
+        console.log(`Cache hit for user ${userId}`);
+        return cachedResult;
+      }
+
+      const userFolderPath = path.join(process.cwd(), 'generated', userId);
+
+      if (!fs.existsSync(userFolderPath)) {
+        // User folder doesn't exist, return empty list
+        const result = {
+          plugins: [],
+          count: 0,
+          userId: userId,
+        };
+        // Cache empty result for shorter time
+        pluginCache.set(cacheKey, result, { ttl: 1000 * 60 * 5 }); // 5 minutes for empty results
+        return result;
+      }
+
+      const items = fs.readdirSync(userFolderPath);
       const plugins = items.filter((item) => {
-        const itemPath = path.join(generatedPath, item);
+        const itemPath = path.join(userFolderPath, item);
         return fs.statSync(itemPath).isDirectory();
       });
 
-      return plugins;
+      const result = {
+        plugins: plugins,
+        count: plugins.length,
+        userId: userId,
+      };
+
+      // Cache the result
+      pluginCache.set(cacheKey, result);
+      console.log(
+        `Cached plugin list for user ${userId}: ${plugins.length} plugins`,
+      );
+
+      return result;
     } catch (error) {
       console.error('Error listing plugins:', error);
-      return [];
+      return {
+        plugins: [],
+        count: 0,
+        userId: userId,
+      };
     }
   }
 
   @Get('download/:pluginName')
   async downloadPlugin(
     @Param('pluginName') pluginName: string,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<StreamableFile> {
+    @Query('userId') userId: string,
+    @Res() res: Response,
+  ): Promise<void> {
     try {
+      // Validate userId
+      if (!userId) {
+        throw new NotFoundException('User ID is required');
+      }
+
       const pluginFolderPath = path.join(
         process.cwd(),
         'generated',
+        userId,
         pluginName,
       );
 
       // Check if plugin folder exists
       if (!fs.existsSync(pluginFolderPath)) {
-        throw new NotFoundException(`Plugin '${pluginName}' not found`);
+        throw new NotFoundException(
+          `Plugin '${pluginName}' not found for user '${userId}'`,
+        );
       }
 
       // Look for the compiled JAR file in target directory
@@ -1363,23 +1457,30 @@ IMPORTANT: Implement ALL features, commands, and event handlers specified in the
         .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
       const jarPath = path.join(targetDir, sortedJars[0].file);
-      const jarBuffer = fs.readFileSync(jarPath);
 
-      // Set response headers for download
-      res.set({
-        'Content-Type': 'application/java-archive',
-        'Content-Disposition': `attachment; filename="${pluginName}.jar"`,
-        'Content-Length': jarBuffer.length.toString(),
-      });
-
-      return new StreamableFile(jarBuffer);
+      // Use streaming service for efficient download
+      await this.streamingService.streamFile(
+        jarPath,
+        res,
+        `${pluginName}.jar`,
+        {
+          enableCompression: true,
+          enableCaching: true,
+          cacheMaxAge: 3600, // 1 hour cache
+        },
+      );
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new NotFoundException(
-        `Error downloading plugin '${pluginName}': ${error.message}`,
-      );
+
+      // Handle streaming errors gracefully
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: 'Download failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -1391,6 +1492,7 @@ IMPORTANT: Implement ALL features, commands, and event handlers specified in the
       // Debug logging - log the entire request body structure
       console.log('Raw chat request body:', JSON.stringify(chatData, null, 2));
       console.log('chatData.pluginName:', chatData.pluginName);
+      console.log('chatData.userId:', chatData.userId);
       console.log('chatData.name:', (chatData as any).name);
 
       // Handle both pluginName and name parameters for compatibility
@@ -1408,14 +1510,23 @@ IMPORTANT: Implement ALL features, commands, and event handlers specified in the
         };
       }
 
+      if (!chatData.userId) {
+        console.error('User ID validation failed - userId is missing');
+        return {
+          success: false,
+          error: 'User ID is required. Please provide userId parameter.',
+        };
+      }
+
       console.log(
-        `Chat request received for plugin: ${pluginName}, message: ${chatData.message}`,
+        `Chat request received for plugin: ${pluginName}, user: ${chatData.userId}, message: ${chatData.message}`,
       );
 
       const response =
         await this.pluginChatService.getChatResponseWithRefinement(
           chatData.message,
           pluginName,
+          chatData.userId,
         );
 
       return {
