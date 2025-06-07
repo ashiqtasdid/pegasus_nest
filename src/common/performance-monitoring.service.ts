@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as os from 'os';
+import { LoggingService } from './logging.service';
 
 /**
  * Performance metrics interface
@@ -64,7 +65,6 @@ interface EndpointPerformance {
  */
 @Injectable()
 export class PerformanceMonitoringService {
-  private readonly logger = new Logger(PerformanceMonitoringService.name);
   private readonly endpointTraces = new Map<string, EndpointTrace>();
   private readonly endpointPerformance = new Map<string, EndpointPerformance>();
   private readonly METRICS_RETENTION_PERIOD = 24 * 60 * 60 * 1000; // 24 hours
@@ -76,9 +76,12 @@ export class PerformanceMonitoringService {
   };
   private metricsInterval: NodeJS.Timeout;
 
-  constructor(private readonly eventEmitter: EventEmitter2) {
+  constructor(
+    private readonly eventEmitter: EventEmitter2,
+    private readonly loggingService: LoggingService,
+  ) {
     this.startMetricsCollection();
-    this.logger.log('Performance monitoring service initialized');
+    this.loggingService.info('Performance monitoring service initialized');
   }
 
   /**
@@ -325,9 +328,12 @@ export class PerformanceMonitoringService {
     };
 
     this.eventEmitter.emit('performance.alert', alert);
-    this.logger.warn(`Performance alert: ${alert.message}`, {
-      alert,
-      correlationId: trace.correlationId,
+    this.loggingService.warn(`Performance alert: ${alert.message}`, {
+      context: 'PerformanceMonitoringService',
+      data: {
+        alert,
+        correlationId: trace.correlationId,
+      },
     });
   }
 
@@ -347,7 +353,10 @@ export class PerformanceMonitoringService {
     };
 
     this.eventEmitter.emit('performance.alert', alert);
-    this.logger.warn(`Performance alert: ${alert.message}`, { alert });
+    this.loggingService.warn(`Performance alert: ${alert.message}`, {
+      context: 'PerformanceMonitoringService',
+      data: { alert },
+    });
   }
 
   /**
@@ -369,7 +378,10 @@ export class PerformanceMonitoringService {
     };
 
     this.eventEmitter.emit('performance.alert', alert);
-    this.logger.warn(`Performance alert: ${alert.message}`, { alert });
+    this.loggingService.warn(`Performance alert: ${alert.message}`, {
+      context: 'PerformanceMonitoringService',
+      data: { alert },
+    });
   }
 
   /**
@@ -392,7 +404,10 @@ export class PerformanceMonitoringService {
     };
 
     this.eventEmitter.emit('performance.alert', alert);
-    this.logger.warn(`Performance alert: ${alert.message}`, { alert });
+    this.loggingService.warn(`Performance alert: ${alert.message}`, {
+      context: 'PerformanceMonitoringService',
+      data: { alert },
+    });
   }
 
   /**

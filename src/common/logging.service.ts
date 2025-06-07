@@ -44,11 +44,22 @@ export class LoggingService {
   private readonly maxLogFiles = 5;
   private activeLogFile: string;
   private correlationIds = new Map<string, string>();
+  private readonly isContainerized: boolean;
+  private readonly useJsonLogging: boolean;
 
   constructor() {
     this.logDirectory = path.join(process.cwd(), 'logs');
     this.ensureLogDirectory();
     this.activeLogFile = this.getActiveLogFile();
+
+    // Detect if we're running in a containerized environment
+    this.isContainerized = this.detectContainerEnvironment();
+
+    // Use JSON logging for containers or when explicitly enabled
+    this.useJsonLogging =
+      this.isContainerized ||
+      process.env.LOG_FORMAT === 'json' ||
+      process.env.NODE_ENV === 'production';
     this.log(
       'LoggingService initialized with structured logging',
       LogLevel.INFO,
@@ -287,9 +298,69 @@ export class LoggingService {
   }
 
   /**
-   * Log to console with appropriate level and color
+   * Detect if we're running in a containerized environment
+   */
+  private detectContainerEnvironment(): boolean {
+    // Check for common container environment indicators
+    if (
+      process.env.DOCKER_CONTAINER ||
+      process.env.KUBERNETES_SERVICE_HOST ||
+      process.env.PM2_HOME ||
+      fs.existsSync('/.dockerenv')
+    ) {
+      return true;
+    }
+
+    // Check if running in container by examining cgroup
+    try {
+      const cgroup = fs.readFileSync('/proc/1/cgroup', 'utf8');
+      if (
+        cgroup.includes('docker') ||
+        cgroup.includes('containerd') ||
+        cgroup.includes('kubepods')
+      ) {
+        return true;
+      }
+    } catch (error) {
+      // Ignore errors when checking cgroup
+    }
+
+    return false;
+  }
+
+  /**
+   * Log to console with appropriate level and format (colored for development, JSON for containers)
    */
   private logToConsole(entry: LogEntry): void {
+    // Use JSON format for containers, colored format for development
+    if (this.useJsonLogging) {
+      // Clean JSON output for containers
+      const cleanEntry = {
+        timestamp: entry.timestamp,
+        level: entry.level.toUpperCase(),
+        message: entry.message,
+        ...(entry.context && { context: entry.context }),
+        ...(entry.correlationId && { correlationId: entry.correlationId }),
+        ...(entry.userId && { userId: entry.userId }),
+        ...(entry.requestId && { requestId: entry.requestId }),
+        ...(entry.error && {
+          error: {
+            message: entry.error.message,
+            ...(entry.error.stack && { stack: entry.error.stack }),
+            ...(entry.error.code && { code: entry.error.code }),
+          },
+        }),
+        ...(entry.data &&
+          Object.keys(entry.data).length > 0 && { metadata: entry.data }),
+      };
+
+      // Use appropriate console method for log level
+      const logFn = this.getLogFunction(entry.level);
+      logFn(JSON.stringify(cleanEntry));
+      return;
+    }
+
+    // Colored format for development
     const { level, message, context, correlationId } = entry;
     let logFn: Function;
     let prefix: string;
@@ -339,14 +410,46 @@ export class LoggingService {
   }
 
   /**
+   * Get appropriate console function for log level
+   */
+  private getLogFunction(level: LogLevel): Function {
+    switch (level) {
+      case LogLevel.DEBUG:
+        return console.debug;
+      case LogLevel.INFO:
+        return console.info;
+      case LogLevel.WARN:
+        return console.warn;
+      case LogLevel.ERROR:
+      case LogLevel.FATAL:
+        return console.error;
+      default:
+        return console.log;
+    }
+  }
+
+  /**
    * Notify about fatal errors
    */
   private notifyFatalError(entry: LogEntry): void {
     // In a production system, this would send alerts via email, SMS, etc.
-    console.error('\x1b[41m\x1b[37m FATAL ERROR NOTIFICATION \x1b[0m');
-    console.error(
-      '\x1b[41m\x1b[37m This would trigger alerts in production \x1b[0m',
-    );
-    console.error('\x1b[41m\x1b[37m', entry.message, '\x1b[0m');
+    if (this.useJsonLogging) {
+      // Clean JSON alert for containers
+      const alert = {
+        timestamp: new Date().toISOString(),
+        level: 'FATAL',
+        type: 'FATAL_ERROR_NOTIFICATION',
+        message: entry.message,
+        production_note: 'This would trigger alerts in production',
+      };
+      console.error(JSON.stringify(alert));
+    } else {
+      // Colored alerts for development
+      console.error('\x1b[41m\x1b[37m FATAL ERROR NOTIFICATION \x1b[0m');
+      console.error(
+        '\x1b[41m\x1b[37m This would trigger alerts in production \x1b[0m',
+      );
+      console.error('\x1b[41m\x1b[37m', entry.message, '\x1b[0m');
+    }
   }
 }

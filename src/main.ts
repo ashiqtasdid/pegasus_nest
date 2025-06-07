@@ -86,6 +86,12 @@ async function bootstrap() {
   const port = process.env.PORT || 3000;
   await app.listen(port);
 
+  // Force immediate console output
+  console.log(`🚀 Pegasus Nest API is running on http://localhost:${port}`);
+  console.log(`🛡️ Security and robustness features are active`);
+  console.log(`⚡ Performance optimizations enabled`);
+  console.log(`📊 Health check: http://localhost:${port}/health`);
+
   Logger.log(
     `🚀 Pegasus Nest API is running on http://localhost:${port}`,
     'Bootstrap',
