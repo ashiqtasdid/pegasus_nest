@@ -7,6 +7,7 @@ import OpenAI from 'openai';
 import * as dotenv from 'dotenv';
 import { Agent } from 'https';
 import * as crypto from 'crypto';
+import { RobustnessService } from '../common/robustness.service';
 dotenv.config();
 
 // 💾 PERFORMANCE OPTIMIZATION: Response caching interface
@@ -64,10 +65,9 @@ const MODEL_USAGE_GUIDE = {
 export class GeminiService {
   private openai: OpenAI;
   private readonly logger = new Logger(GeminiService.name);
-  private failureCount = 0;
-  private lastFailureTime = 0;
-  private readonly maxFailures = 5;
-  private readonly circuitBreakerTimeout = 60000; // 1 minute
+  // Circuit breaker tracking (now handled by centralized robustness service)
+  private failureCount = 0; // Keep for backward compatibility
+  private lastFailureTime = 0; // Keep for backward compatibility
 
   // 🛡️ ROBUSTNESS: Service health monitoring
   private serviceHealth = {
@@ -101,7 +101,7 @@ export class GeminiService {
     compressionSavings: 0,
   };
 
-  constructor() {
+  constructor(private readonly robustnessService: RobustnessService) {
     const apiKey = process.env.OPENROUTER_API_KEY || 'YOUR_API_KEY';
 
     // 🚀 PERFORMANCE: Enhanced HTTPS agent with optimized connection pooling
@@ -140,28 +140,6 @@ export class GeminiService {
 
     // 🎯 Start auto-optimization monitoring
     setInterval(() => this.autoOptimize(), 600000); // Auto-optimize every 10 minutes
-  }
-
-  /**
-   * Check if circuit breaker should prevent requests
-   */
-  private isCircuitBreakerOpen(): boolean {
-    if (this.failureCount >= this.maxFailures) {
-      const timeSinceLastFailure = Date.now() - this.lastFailureTime;
-      if (timeSinceLastFailure < this.circuitBreakerTimeout) {
-        this.logger.warn(
-          `Circuit breaker is open. Blocking request. ${Math.round(
-            (this.circuitBreakerTimeout - timeSinceLastFailure) / 1000,
-          )}s remaining.`,
-        );
-        return true;
-      } else {
-        // Reset circuit breaker after timeout
-        this.failureCount = 0;
-        this.logger.log('Circuit breaker reset - attempting requests again');
-      }
-    }
-    return false;
   }
 
   /**
@@ -245,20 +223,13 @@ export class GeminiService {
     throw lastError!;
   }
   /**
-   * Enhanced request wrapper with connection resilience and circuit breaker
+   * Enhanced request wrapper with connection resilience
    */
   private async makeRobustRequest(
     requestFn: () => Promise<any>,
     retries?: number,
   ): Promise<any> {
     const maxRetries = retries || 3;
-
-    // Check circuit breaker
-    if (this.isCircuitBreakerOpen()) {
-      throw new Error(
-        'Service temporarily unavailable due to repeated failures. Please try again later.',
-      );
-    }
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -275,7 +246,7 @@ export class GeminiService {
         const result = await requestFn();
         this.logger.log(`API request successful on attempt ${attempt}`);
 
-        // Reset failure count on success
+        // Reset failure count on success (for backward compatibility)
         this.failureCount = 0;
         return result;
       } catch (error) {
@@ -318,7 +289,7 @@ export class GeminiService {
             `All ${maxRetries} attempts failed. Last error: ${error.message}`,
           );
 
-          // Increment failure count for circuit breaker
+          // Increment failure count for backward compatibility
           this.failureCount++;
           this.lastFailureTime = Date.now();
 
@@ -527,17 +498,38 @@ export class GeminiService {
       return await this.pendingRequests.get(cacheKey)!;
     }
 
-    // Create new request
-    const requestPromise = this.executeOptimizedRequest(prompt, model);
-    this.pendingRequests.set(cacheKey, requestPromise);
+    // Use centralized circuit breaker with fallback
+    return await this.robustnessService.executeWithCircuitBreaker(
+      'gemini_service',
+      async () => {
+        // Create new request
+        const requestPromise = this.executeOptimizedRequest(prompt, model);
+        this.pendingRequests.set(cacheKey, requestPromise);
 
-    try {
-      const response = await requestPromise;
-      this.setCachedResponse(cacheKey, response, model);
-      return response;
-    } finally {
-      this.pendingRequests.delete(cacheKey);
-    }
+        try {
+          const response = await requestPromise;
+          this.setCachedResponse(cacheKey, response, model);
+          return response;
+        } finally {
+          this.pendingRequests.delete(cacheKey);
+        }
+      },
+      async () => {
+        // Fallback: Return cached response if available, otherwise generic error response
+        const fallbackResponse = this.getCachedResponse(cacheKey);
+        if (fallbackResponse) {
+          this.logger.warn(
+            '🔄 Circuit breaker open - using stale cached response',
+          );
+          return fallbackResponse;
+        }
+
+        this.logger.error('🚨 Circuit breaker open - no fallback available');
+        throw new Error(
+          'Gemini service is temporarily unavailable. Please try again later.',
+        );
+      },
+    );
   }
 
   /**

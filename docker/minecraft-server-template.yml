@@ -1,0 +1,148 @@
+# Docker Compose template for Minecraft servers
+# This file is used as a template by the MinecraftServerService
+version: '3.8'
+
+services:
+  minecraft-server-template:
+    image: itzg/minecraft-server:latest
+    container_name: minecraft-${SERVER_NAME}
+    ports:
+      - '${SERVER_PORT}:25565'
+      - '${RCON_PORT}:25575'
+    environment:
+      EULA: 'TRUE'
+      TYPE: 'PAPER'
+      VERSION: '1.20.4'
+      MEMORY: '${SERVER_MEMORY}'
+      MAX_PLAYERS: '${MAX_PLAYERS}'
+      MOTD: '§6${SERVER_NAME} §7- §aPowered by Pegasus Nest'
+      DIFFICULTY: '${DIFFICULTY}'
+      GAMEMODE: '${GAMEMODE}'
+      ALLOW_NETHER: 'true'
+      ANNOUNCE_PLAYER_ACHIEVEMENTS: 'true'
+      ENABLE_COMMAND_BLOCK: 'true'
+      FORCE_GAMEMODE: 'false'
+      GENERATE_STRUCTURES: 'true'
+      HARDCORE: 'false'
+      MAX_BUILD_HEIGHT: '256'
+      MAX_TICK_TIME: '60000'
+      MAX_WORLD_SIZE: '29999984'
+      PVP: 'true'
+      SPAWN_ANIMALS: 'true'
+      SPAWN_MONSTERS: 'true'
+      SPAWN_NPCS: 'true'
+      VIEW_DISTANCE: '10'
+      ENABLE_RCON: 'true'
+      RCON_PASSWORD: '${RCON_PASSWORD}'
+      RCON_PORT: '25575'
+      BROADCAST_RCON_TO_OPS: 'true'
+      # JVM optimization flags
+      JVM_OPTS: '-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:G1HeapRegionSize=8M -XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4 -XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1'
+      # Plugin and mod support
+      PLUGINS_SYNC_UPDATE: 'false'
+      REPLACE_ENV_VARIABLES: 'true'
+      # Backup configuration
+      ENABLE_AUTOPAUSE: 'true'
+      AUTOPAUSE_TIMEOUT_EST: '3600'
+      AUTOPAUSE_TIMEOUT_KN: '120'
+      AUTOPAUSE_TIMEOUT_INIT: '600'
+      # Logging
+      LOG_TIMESTAMP: 'true'
+      USE_AIKAR_FLAGS: 'true'
+      # Resource limits
+      INIT_MEMORY: '${INIT_MEMORY}'
+      MAX_MEMORY: '${SERVER_MEMORY}'
+    volumes:
+      - '${DATA_DIR}:/data'
+      - '${PLUGINS_DIR}:/data/plugins'
+      - '${BACKUPS_DIR}:/backups'
+      - '/etc/timezone:/etc/timezone:ro'
+      - '/etc/localtime:/etc/localtime:ro'
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    networks:
+      - minecraft-network
+    deploy:
+      resources:
+        limits:
+          memory: '${CONTAINER_MEMORY_LIMIT}'
+        reservations:
+          memory: '${CONTAINER_MEMORY_RESERVATION}'
+    healthcheck:
+      test: ['CMD', 'mc-health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    labels:
+      - 'pegasus.nest.managed=true'
+      - 'pegasus.nest.user=${USER_ID}'
+      - 'pegasus.nest.server=${SERVER_NAME}'
+      - 'pegasus.nest.created=${CREATION_TIME}'
+
+networks:
+  minecraft-network:
+    external: true
+
+  # Additional services for monitoring and backup
+  minecraft-backup:
+    image: itzg/mc-backup:latest
+    container_name: minecraft-backup-${SERVER_NAME}
+    environment:
+      BACKUP_INTERVAL: '4h'
+      PRUNE_BACKUPS_DAYS: '7'
+      BACKUP_NAME: '${SERVER_NAME}'
+      INITIAL_DELAY: '2m'
+      SERVER_PORT: '25575'
+      RCON_PASSWORD: '${RCON_PASSWORD}'
+      # Compression and optimization
+      TAR_COMPRESS_TYPE: 'gzip'
+      ZSTD_PARAMETERS: '-3 --long=25 --single-thread'
+      EXCLUDES: '*.tmp,cache'
+      LINK_LATEST: 'true'
+      # Notification settings (optional)
+      # WEBHOOK_URL: "${WEBHOOK_URL}"
+      PRE_BACKUP_SCRIPT: |
+        echo "Starting backup for ${SERVER_NAME}..."
+        rcon-cli save-all
+        rcon-cli save-off
+        sleep 5
+      POST_BACKUP_SCRIPT: |
+        rcon-cli save-on
+        echo "Backup completed for ${SERVER_NAME}"
+    volumes:
+      - '${DATA_DIR}:/data:ro'
+      - '${BACKUPS_DIR}:/backups'
+    depends_on:
+      - minecraft-server-template
+    restart: unless-stopped
+    networks:
+      - minecraft-network
+    labels:
+      - 'pegasus.nest.service=backup'
+      - 'pegasus.nest.user=${USER_ID}'
+      - 'pegasus.nest.server=${SERVER_NAME}'
+
+  # Optional: Minecraft server monitoring
+  minecraft-monitor:
+    image: grafana/grafana:latest
+    container_name: minecraft-monitor-${SERVER_NAME}
+    ports:
+      - '${GRAFANA_PORT}:3000'
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: '${GRAFANA_PASSWORD}'
+      GF_INSTALL_PLUGINS: 'grafana-worldmap-panel'
+    volumes:
+      - '${MONITOR_DIR}/grafana:/var/lib/grafana'
+      - '${MONITOR_DIR}/dashboards:/etc/grafana/provisioning/dashboards'
+      - '${MONITOR_DIR}/datasources:/etc/grafana/provisioning/datasources'
+    restart: unless-stopped
+    networks:
+      - minecraft-network
+    labels:
+      - 'pegasus.nest.service=monitoring'
+      - 'pegasus.nest.user=${USER_ID}'
+      - 'pegasus.nest.server=${SERVER_NAME}'
+    profiles:
+      - monitoring

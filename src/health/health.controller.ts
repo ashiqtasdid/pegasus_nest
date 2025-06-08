@@ -1,7 +1,6 @@
 import { Controller, Get, Query, Param, Post } from '@nestjs/common';
 import { HealthMonitoringService } from '../common/health-monitoring.service';
 import { MemoryMonitorService } from '../services/memory-monitor.service';
-import { DatabasePoolService } from '../services/database-pool.service';
 import { StreamingService } from '../services/streaming.service';
 import { PerformanceTrackingService } from '../services/performance-tracking.service';
 
@@ -10,7 +9,6 @@ export class HealthController {
   constructor(
     private readonly healthMonitoringService: HealthMonitoringService,
     private readonly memoryMonitorService: MemoryMonitorService,
-    private readonly databasePoolService: DatabasePoolService,
     private readonly streamingService: StreamingService,
     private readonly performanceTrackingService: PerformanceTrackingService,
   ) {}
@@ -139,22 +137,9 @@ export class HealthController {
     };
   }
 
-  @Get('database')
-  async databaseStats() {
-    const stats = this.databasePoolService.getPoolStats();
-    const healthCheck = await this.databasePoolService.healthCheck();
-
-    return {
-      timestamp: new Date().toISOString(),
-      stats,
-      health: healthCheck,
-    };
-  }
-
   @Get('performance')
   async performanceOverview() {
     const memoryStats = this.memoryMonitorService.getMemoryStats();
-    const databaseStats = this.databasePoolService.getPoolStats();
     const streamingStats = this.streamingService.getStreamingStats();
     const performanceStats =
       this.performanceTrackingService.getPerformanceStats(60);
@@ -168,11 +153,9 @@ export class HealthController {
       nodeVersion: process.version,
       pid: process.pid,
     };
-
     return {
       timestamp: new Date().toISOString(),
       memory: memoryStats,
-      database: databaseStats,
       streaming: streamingStats,
       requests: {
         totalRequests: performanceStats.totalRequests,

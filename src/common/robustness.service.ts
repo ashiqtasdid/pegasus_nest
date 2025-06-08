@@ -168,9 +168,11 @@ export class RobustnessService {
   private initializeCircuitBreakers(): void {
     const defaultBreakers = [
       'ai_service',
+      'gemini_service',
       'file_operations',
       'compilation_service',
       'plugin_chat',
+      'plugin_creation',
       'external_api',
     ];
 

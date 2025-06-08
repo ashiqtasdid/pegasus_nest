@@ -156,19 +156,11 @@ run_health_checks() {
         print_error "✗ Basic health check failed"
         return 1
     fi
-    
-    # Memory monitoring check
+      # Memory monitoring check
     if curl -s -f http://localhost:$port/health/memory >/dev/null 2>&1; then
         print_success "✓ Memory monitoring check passed"
     else
         print_warning "⚠ Memory monitoring check failed"
-    fi
-    
-    # Database health check
-    if curl -s -f http://localhost:$port/health/database >/dev/null 2>&1; then
-        print_success "✓ Database health check passed"
-    else
-        print_warning "⚠ Database health check failed"
     fi
     
     # Performance monitoring check
@@ -185,12 +177,10 @@ run_health_checks() {
 show_service_info() {
     local port=${1:-3000}
     print_success "Pegasus Nest is now running!"
-    echo ""
-    echo "🌐 Service URLs:"
+    echo ""    echo "🌐 Service URLs:"
     echo "   Main API: http://localhost:$port"
     echo "   Health Check: http://localhost:$port/health"
     echo "   Memory Status: http://localhost:$port/health/memory"
-    echo "   Database Status: http://localhost:$port/health/database"
     echo "   Performance Metrics: http://localhost:$port/health/performance"
     echo "   Full Metrics: http://localhost:$port/health/metrics"
     echo ""
