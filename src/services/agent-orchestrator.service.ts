@@ -9,6 +9,7 @@ import { EnhancedPromptEngineeringService } from './enhanced-prompt-engineering.
 import { CodeCompilerService } from './code-compiler.service';
 import { QualityAnalyticsService } from './quality-analytics.service';
 import { ChatClassificationService } from './chat-classification.service';
+import { IncrementalAgentService } from './incremental-agent.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -100,6 +101,7 @@ export class AgentOrchestratorService {
     private readonly compilerService: CodeCompilerService,
     private readonly qualityService: QualityAnalyticsService,
     private readonly classificationService: ChatClassificationService,
+    private readonly incrementalAgentService: IncrementalAgentService,
     private readonly eventEmitter: EventEmitter2,
   ) {
     this.initializeAgents();
@@ -271,6 +273,87 @@ export class AgentOrchestratorService {
         agentsUsed: this.getUsedAgents(sessionId),
         retryCount: finalAssessment.retryCount || 0,
       };
+    } catch (error) {
+      this.logger.error(`❌ Plugin creation failed: ${error.message}`);
+      return {
+        success: false,
+        qualityScore: 0,
+        issues: [error.message],
+        suggestions: [
+          'Try simplifying the request or provide more specific details',
+        ],
+        timeTaken: Date.now() - startTime,
+        agentsUsed: [],
+        retryCount: 0,
+      };
+    }
+  }
+
+  /**
+   * 🚀 NEW: Enhanced incremental plugin creation with file-by-file approach
+   * This method creates plugins with maximum accuracy by processing files incrementally
+   * while maintaining full context awareness between each file creation.
+   */
+  async createPluginWithIncrementalAccuracy(
+    prompt: string,
+    pluginName: string,
+    userId: string,
+    useIncrementalMode: boolean = true,
+  ): Promise<CreationResult> {
+    this.logger.log(
+      `🚀 Starting ${useIncrementalMode ? 'incremental' : 'standard'} plugin creation for: ${pluginName}`,
+    );
+
+    const startTime = Date.now();
+    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const projectPath = path.join(
+      process.cwd(),
+      'generated',
+      userId,
+      pluginName,
+    );
+
+    try {
+      let result;
+
+      if (useIncrementalMode) {
+        // Use the new incremental approach for maximum accuracy
+        this.logger.log(
+          '🎯 Using Incremental Agent Mode for enhanced accuracy',
+        );
+
+        const incrementalResult =
+          await this.incrementalAgentService.createPluginIncremental(
+            pluginName,
+            prompt,
+            userId,
+            sessionId,
+            projectPath,
+          );
+
+        // Convert incremental result to standard CreationResult format
+        result = {
+          success: incrementalResult.success,
+          pluginPath: incrementalResult.context?.projectPath,
+          jarPath: incrementalResult.jarPath,
+          qualityScore: incrementalResult.qualityScore,
+          issues: incrementalResult.context?.errors || [],
+          suggestions: incrementalResult.recommendations,
+          timeTaken: incrementalResult.totalTime,
+          agentsUsed: ['incremental-agent'],
+          retryCount: 0,
+        };
+      } else {
+        // Fall back to standard multi-agent approach
+        this.logger.log('🔄 Using Standard Multi-Agent approach');
+        result = await this.createPluginWithMaxAccuracy(
+          prompt,
+          pluginName,
+          userId,
+        );
+      }
+
+      return result;
     } catch (error) {
       this.logger.error(`❌ Plugin creation failed: ${error.message}`);
       return {

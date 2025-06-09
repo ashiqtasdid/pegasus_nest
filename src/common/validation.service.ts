@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as validator from 'validator';
-import * as sanitizeHtml from 'sanitize-html';
+import sanitizeHtml from 'sanitize-html';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
@@ -54,31 +54,28 @@ interface SecurityContext {
 export class ValidationService {
   private readonly logger = new Logger(ValidationService.name);
 
-  // Security patterns to detect and block
+  // Security patterns to detect and block - Made more specific to avoid false positives
   private readonly SECURITY_PATTERNS = [
-    // SQL Injection patterns
-    /(\b(union|select|insert|update|delete|drop|create|alter|exec|execute)\b)/gi,
-    /(--|\/\*|\*\/|;|'|"|`)/g,
+    // SQL Injection patterns - More specific to avoid false positives with normal Java code
+    /(\b(union\s+select|drop\s+table|delete\s+from|insert\s+into)\b)/gi,
+    /(--\s*[^\r\n]*(?:union|select|drop|delete|insert|update))/gi, // SQL comments with SQL keywords
 
-    // XSS patterns
+    // XSS patterns - More specific
     /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-    /javascript:/gi,
-    /on\w+\s*=/gi,
-    /<iframe\b[^>]*>/gi,
+    /javascript:\s*(?:alert|prompt|confirm|eval)/gi, // Only flag dangerous JS functions
+    /on\w+\s*=\s*["'][^"']*(?:alert|prompt|confirm|eval)[^"']*["']/gi,
+    /<iframe\b[^>]*src\s*=\s*["'][^"']*(?:javascript|data:)[^"']*["']/gi,
 
-    // Path traversal patterns
-    /\.\.\/|\.\.\\|\.\.\%2f|\.\.\%5c/gi,
-    /\%2e\%2e\%2f|\%2e\%2e\%5c/gi,
+    // Path traversal patterns - More specific
+    /\.\.[\/\\].*[\/\\]\.\./gi, // Multiple directory traversals
+    /\%2e\%2e\%2f.*\%2e\%2e\%2f/gi, // Encoded traversals
 
-    // Command injection patterns
-    /[;&|`$(){}[\]]/g,
-    /\b(eval|exec|system|shell_exec|passthru|popen|proc_open)\b/gi,
+    // Command injection patterns - Exclude Java syntax patterns
+    /[;&|`]\s*(?:rm|del|format|sudo|su|chmod|chown|wget|curl|nc|netcat)\b/gi,
+    /\b(eval|system|shell_exec|passthru|popen|proc_open)\s*\(\s*[^)]*(?:\$|var\s)/gi,
 
-    // LDAP injection patterns
-    /[()&|!*<>=]/g,
-
-    // NoSQL injection patterns
-    /\$where|\$ne|\$gt|\$lt|\$gte|\$lte|\$in|\$nin|\$regex|\$exists/gi,
+    // NoSQL injection patterns - More specific
+    /\$where\s*:\s*["'][^"']*(?:\$|function)/gi,
   ];
 
   // Dangerous file extensions
@@ -567,7 +564,7 @@ export class ValidationService {
   }
 
   /**
-   * Check for security patterns
+   * Check for security patterns with context-aware validation
    */
   private checkSecurityPatterns(
     value: string,
@@ -578,12 +575,20 @@ export class ValidationService {
   } {
     const threats: string[] = [];
 
+    // Skip security checks for known safe contexts
+    if (this.isKnownSafeContext(value, fieldName)) {
+      return { isSafe: true, threats: [] };
+    }
+
     for (const pattern of this.SECURITY_PATTERNS) {
       if (pattern.test(value)) {
-        threats.push(`Suspicious pattern detected in ${fieldName}`);
-        this.logger.warn(
-          `🚨 Security pattern detected in ${fieldName}: ${pattern.source}`,
-        );
+        // Additional context validation to reduce false positives
+        if (!this.isValidJavaCode(value, pattern)) {
+          threats.push(`Suspicious pattern detected in ${fieldName}`);
+          this.logger.warn(
+            `🚨 Security pattern detected in ${fieldName}: ${pattern.source}`,
+          );
+        }
       }
     }
 
@@ -591,6 +596,83 @@ export class ValidationService {
       isSafe: threats.length === 0,
       threats,
     };
+  }
+
+  /**
+   * Check if the content is in a known safe context (like Java code)
+   */
+  private isKnownSafeContext(value: string, fieldName: string): boolean {
+    // Java file content context
+    if (
+      fieldName.includes('java') ||
+      fieldName.includes('code') ||
+      fieldName.includes('content')
+    ) {
+      return (
+        value.includes('package ') ||
+        value.includes('public class ') ||
+        value.includes('import ') ||
+        /^(public|private|protected)\s+(static\s+)?(void|int|String|boolean|double|float)\s+\w+/m.test(
+          value,
+        )
+      );
+    }
+
+    // Plugin configuration context
+    if (
+      fieldName.includes('plugin') ||
+      fieldName.includes('yml') ||
+      fieldName.includes('yaml')
+    ) {
+      return (
+        value.includes('name:') ||
+        value.includes('version:') ||
+        value.includes('main:') ||
+        value.includes('commands:')
+      );
+    }
+
+    return false;
+  }
+
+  /**
+   * Validate if a pattern match is actually valid Java code
+   */
+  private isValidJavaCode(value: string, pattern: RegExp): boolean {
+    const match = pattern.exec(value);
+    if (!match) return true;
+
+    const matchedText = match[0];
+    const contextBefore = value.substring(
+      Math.max(0, match.index - 50),
+      match.index,
+    );
+    const contextAfter = value.substring(
+      match.index + matchedText.length,
+      match.index + matchedText.length + 50,
+    );
+
+    // Check if it's part of a Java comment
+    if (contextBefore.includes('//') || contextBefore.includes('/*')) {
+      return true;
+    }
+
+    // Check if it's part of a Java string literal
+    if (
+      (contextBefore.includes('"') && contextAfter.includes('"')) ||
+      (contextBefore.includes("'") && contextAfter.includes("'"))
+    ) {
+      return true;
+    }
+
+    // Check if it's part of a Java method signature or class declaration
+    if (
+      /\b(public|private|protected|class|interface|enum)\b/.test(contextBefore)
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   /**

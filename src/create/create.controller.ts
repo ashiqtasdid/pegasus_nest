@@ -120,6 +120,14 @@ export class CreateController {
   }
   @Post()
   async create(@Body() createData: CreateRequestDto): Promise<any> {
+    // Handle both pluginName and name parameters for compatibility
+    const folderName = createData.name || createData.pluginName;
+    if (!folderName) {
+      throw new Error(
+        'Plugin name is required. Please provide either name or pluginName parameter.',
+      );
+    }
+
     // Initialize agent processing state
     const state: ProcessingState = {
       status: 'pending',
@@ -128,16 +136,33 @@ export class CreateController {
       this.logState(
         state,
         '🤖 Using Advanced Multi-Agent System (default behavior)',
-        createData.name,
+        folderName,
       );
 
       try {
-        const result =
-          await this.agentOrchestratorService.createPluginWithMaxAccuracy(
-            createData.prompt,
-            createData.name,
-            createData.userId,
-          );
+        // 🚀 NEW: Use incremental agent mode for maximum accuracy
+        const useIncrementalMode = createData.useIncrementalMode !== false; // Default to true
+
+        this.logState(
+          state,
+          useIncrementalMode
+            ? '🎯 Activating Incremental Agent Mode for file-by-file creation'
+            : '🔄 Using Standard Multi-Agent approach',
+          folderName,
+        );
+
+        const result = useIncrementalMode
+          ? await this.agentOrchestratorService.createPluginWithIncrementalAccuracy(
+              createData.prompt,
+              folderName, // Use the resolved folder name
+              createData.userId,
+              true, // Force incremental mode
+            )
+          : await this.agentOrchestratorService.createPluginWithMaxAccuracy(
+              createData.prompt,
+              folderName, // Use the resolved folder name
+              createData.userId,
+            );
 
         if (result.success) {
           this.logState(
@@ -146,87 +171,25 @@ export class CreateController {
             createData.name,
           );
 
-          // Auto-install plugin to user's server
-          try {
-            const userServers =
-              await this.minecraftServerService.getUserServers(
-                createData.userId,
-              );
-            if (userServers.length > 0) {
-              const serverId = userServers[0].id;
-              await this.minecraftServerService.installPlugins(serverId, [
-                createData.name,
-              ]);
-              this.logState(
-                state,
-                `🚀 Plugin auto-installed to user server`,
-                createData.name,
-              );
-            }
-          } catch (installError) {
-            console.warn(`Plugin auto-installation failed:`, installError);
-          } // Invalidate plugin cache
-          const cacheKey = `plugins_${createData.userId}`;
-          pluginCache.delete(cacheKey);
-
-          // 🔍 ENHANCED: Perform comprehensive feature validation on the created plugin
-          let validationReport = null;
-          try {
-            this.logState(
-              state,
-              '🔍 Running comprehensive feature validation on created plugin',
-              createData.name,
-            );
-
-            validationReport =
-              await this.pluginFeatureValidationService.validateAndFixPlugin(
-                createData.prompt,
-                result.pluginPath,
-                createData.userId,
-              );
-
-            if (validationReport.overallScore >= 0.8) {
-              this.logState(
-                state,
-                `✅ Feature validation passed with score ${(validationReport.overallScore * 100).toFixed(1)}%`,
-                createData.name,
-              );
-            } else {
-              this.logState(
-                state,
-                `⚠️ Feature validation completed with score ${(validationReport.overallScore * 100).toFixed(1)}% - ${validationReport.missingSummary.length} missing features`,
-                createData.name,
-              );
-            }
-          } catch (validationError) {
-            this.logState(
-              state,
-              `⚠️ Feature validation failed: ${validationError.message}`,
-              createData.name,
-            );
-            console.warn('Feature validation error:', validationError);
-          }
-
-          // Return the JSON result object that tests expect
           return {
             success: true,
+            message: `Plugin '${folderName}' created successfully using ${useIncrementalMode ? 'incremental' : 'standard'} agent mode`,
             qualityScore: result.qualityScore,
-            timeTaken: result.timeTaken,
-            agentsUsed: result.agentsUsed,
-            retryCount: result.retryCount,
-            jarPath: result.jarPath,
             pluginPath: result.pluginPath,
-            issues: result.issues,
-            suggestions: result.suggestions,
-            validationReport: validationReport, // Add validation report to response
-            message: `Plugin '${createData.name}' created successfully!`,
-            autoInstalled: true,
+            jarPath: result.jarPath,
+            timeTaken: result.timeTaken,
+            agentMode: useIncrementalMode ? 'incremental' : 'standard',
+            createdFiles:
+              result.issues.length === 0
+                ? 'All files created successfully'
+                : `Created with ${result.issues.length} minor issues`,
+            recommendations: result.suggestions,
           };
         } else {
           this.logState(
             state,
             `❌ Agent system failed: ${result.issues.join(', ')}. Falling back to standard creation.`,
-            createData.name,
+            folderName,
           );
           // Fall through to standard creation logic
         }
@@ -234,7 +197,7 @@ export class CreateController {
         this.logState(
           state,
           `⚠️ Agent system error: ${agentError.message}. Using standard creation.`,
-          createData.name,
+          folderName,
         );
         // Fall through to standard creation logic
       }
@@ -250,7 +213,6 @@ export class CreateController {
       }
 
       // Get folder path for the requested plugin with user-specific directory
-      const folderName = createData.name;
       const userFolderPath = path.join(
         process.cwd(),
         'generated',
@@ -1039,8 +1001,6 @@ BUKKIT COLOR API REQUIREMENTS:
 - For chat colors: use ChatColor.RED, ChatColor.BLUE, etc. (not Color class)
 - Example correct usage: Color.fromRGB(255, 0, 0) for red, Color.BLUE for blue
 - Example WRONG usage: Color.valueOf("RED") - DO NOT USE THIS
-
-OUTPUT FORMAT - Return ONLY valid JSON with NO additional text:
 
 OUTPUT FORMAT - Return ONLY valid JSON with NO additional text:
 

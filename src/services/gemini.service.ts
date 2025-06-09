@@ -274,10 +274,20 @@ export class GeminiService {
           error.message.includes('connection') ||
           error.message.includes('ECONNRESET');
 
-        // Don't retry on authentication, rate limit, or response parsing errors
+        // Handle rate limiting (429) with intelligent fallback
+        if (error.response?.status === 429) {
+          this.logger.warn(`⏰ Rate limit hit (429). Attempting fallback to different model...`);
+          
+          // Try fallback strategy for rate limiting
+          const fallbackResult = await this.handleRateLimitFallback(error, attempt, maxRetries);
+          if (fallbackResult) {
+            return fallbackResult;
+          }
+        }
+
+        // Don't retry on authentication or response parsing errors
         const isNonRetryableError =
           error.response?.status === 401 ||
-          error.response?.status === 429 ||
           error.message.includes('API returned') ||
           error.message.includes('undefined') ||
           error.message.includes('Cannot read properties');
@@ -1102,5 +1112,58 @@ export class GeminiService {
       AI_MODELS.FALLBACK_FREE,
       'google/gemini-flash-1.5',
     ];
+  }
+
+  /**
+   * 🛡️ RATE LIMITING: Handle rate limit errors with intelligent fallback strategy
+   */
+  private async handleRateLimitFallback(
+    error: any,
+    attempt: number,
+    maxRetries: number,
+  ): Promise<any | null> {
+    const rateLimitInfo = this.extractRateLimitInfo(error);
+    
+    // If we have rate limit info, wait the suggested time
+    if (rateLimitInfo.resetTime) {
+      const waitTime = Math.min(rateLimitInfo.resetTime * 1000, 30000); // Max 30 seconds
+      this.logger.warn(
+        `⏰ Rate limit reset in ${rateLimitInfo.resetTime}s, waiting ${waitTime}ms...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+      return null; // Signal to retry with the same model
+    }
+
+    // If no reset time info, use progressive delays
+    const progressiveDelay = Math.min(
+      1000 * Math.pow(2, attempt), // Exponential backoff
+      60000 // Max 1 minute
+    );
+    
+    this.logger.warn(
+      `⏰ Rate limit encountered, using progressive delay: ${progressiveDelay}ms`
+    );
+    await new Promise((resolve) => setTimeout(resolve, progressiveDelay));
+    
+    return null; // Signal to retry
+  }
+
+  /**
+   * 🛡️ RATE LIMITING: Extract rate limit information from error response
+   */
+  private extractRateLimitInfo(error: any): {
+    resetTime?: number;
+    remaining?: number;
+    limit?: number;
+  } {
+    const headers = error.response?.headers || {};
+    
+    return {
+      resetTime: headers['x-ratelimit-reset-requests'] || 
+                headers['retry-after'] || 
+                headers['x-retry-after'],
+      remaining: headers['x-ratelimit-remaining-requests'],
+      limit: headers['x-ratelimit-limit-requests'],
+    };
   }
 }

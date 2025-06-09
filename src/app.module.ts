@@ -31,6 +31,7 @@ import { EnhancedPromptEngineeringService } from './services/enhanced-prompt-eng
 import { QualityAnalyticsService } from './services/quality-analytics.service';
 import { AgentOrchestratorService } from './services/agent-orchestrator.service';
 import { PluginFeatureValidationService } from './services/plugin-feature-validation.service';
+import { IncrementalAgentService } from './services/incremental-agent.service';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { PluginFeatureValidationService } from './services/plugin-feature-valida
     QualityAnalyticsService,
     AgentOrchestratorService,
     PluginFeatureValidationService,
+    IncrementalAgentService,
   ],
 })
 export class AppModule {}
