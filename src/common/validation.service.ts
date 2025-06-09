@@ -304,7 +304,7 @@ export class ValidationService {
     }
 
     // Sanitize the string
-    let sanitizedValue = this.sanitizeString(value);
+    const sanitizedValue = this.sanitizeString(value);
 
     // Length validation
     if (rule.minLength && sanitizedValue.length < rule.minLength) {
@@ -479,7 +479,7 @@ export class ValidationService {
     }
 
     // Sanitize filename
-    let sanitizedValue = value.replace(/[<>:"/\\|?*\x00-\x1f]/g, '');
+    const sanitizedValue = value.replace(/[<>:"/\\|?*\x00-\x1f]/g, '');
 
     // Check for reserved names (Windows)
     const reservedNames = [

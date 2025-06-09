@@ -37,28 +37,36 @@ interface CompressedPrompt {
 
 // 🤖 AI MODEL CONFIGURATION: Standardized model assignments per task type
 const AI_MODELS = {
-  // 🔍 PROMPT REFINEMENT: Use free DeepSeek model for analysis and prompt improvement
-  PROMPT_REFINEMENT: 'deepseek/deepseek-prover-v2:free',
+  // 🔍 PROMPT REFINEMENT: Use reliable free model for analysis and prompt improvement
+  PROMPT_REFINEMENT: 'google/gemini-flash-1.5',
 
   // 🚀 CODE GENERATION: Use Claude Sonnet 4 for high-quality code generation
   CODE_GENERATION: 'anthropic/claude-sonnet-4',
 
-  // 🛠️ ERROR FIXING: Use DeepSeek free model for everything except file and code generation
-  ERROR_FIXING: 'deepseek/deepseek-prover-v2:free',
+  // 🛠️ ERROR FIXING: Use reliable free model for everything except file and code generation
+  ERROR_FIXING: 'google/gemini-flash-1.5',
 
-  // 💬 CHAT ASSISTANCE: Use DeepSeek free model for everything except file and code generation
-  CHAT_ASSISTANCE: 'deepseek/deepseek-prover-v2:free',
+  // 💬 CHAT ASSISTANCE: Use reliable free model for everything except file and code generation
+  CHAT_ASSISTANCE: 'google/gemini-flash-1.5',
 
   // 📝 PLUGIN OPERATIONS: Use Claude Sonnet 4 for plugin modifications (file/code generation)
   PLUGIN_OPERATIONS: 'anthropic/claude-sonnet-4',
+
+  // 🔄 FALLBACK MODELS: Backup models when primary fails
+  FALLBACK_FREE: 'meta-llama/llama-3.2-3b-instruct:free',
+  FALLBACK_PREMIUM: 'anthropic/claude-3.7-sonnet',
 } as const;
 
 // 📊 MODEL USAGE DOCUMENTATION
 const MODEL_USAGE_GUIDE = {
-  'deepseek/deepseek-prover-v2:free':
-    'Free model for all general tasks - cost effective with good quality',
+  'google/gemini-flash-1.5':
+    'Fast and reliable free model for general tasks - high quality with good availability',
   'anthropic/claude-sonnet-4':
-    'Premium model exclusively for file and code generation - high quality',
+    'Premium model exclusively for file and code generation - highest quality',
+  'meta-llama/llama-3.2-3b-instruct:free':
+    'Fallback free model when primary models fail',
+  'openai/gpt-3.5-turbo':
+    'Fallback premium model for complex tasks when Claude fails',
 } as const;
 
 @Injectable()
@@ -220,7 +228,7 @@ export class GeminiService {
       }
     }
 
-    throw lastError!;
+    throw lastError;
   }
   /**
    * Enhanced request wrapper with connection resilience
@@ -438,7 +446,7 @@ export class GeminiService {
   private compressPrompt(prompt: string): CompressedPrompt {
     const originalLength = prompt.length;
 
-    let compressed = prompt
+    const compressed = prompt
       // Remove excessive whitespace
       .replace(/\s+/g, ' ')
       // Remove redundant phrases
@@ -495,15 +503,15 @@ export class GeminiService {
       this.logger.log(
         `⏳ Deduplicating request - waiting for pending response`,
       );
-      return await this.pendingRequests.get(cacheKey)!;
+      return await this.pendingRequests.get(cacheKey);
     }
 
     // Use centralized circuit breaker with fallback
     return await this.robustnessService.executeWithCircuitBreaker(
       'gemini_service',
       async () => {
-        // Create new request
-        const requestPromise = this.executeOptimizedRequest(prompt, model);
+        // Create new request with model fallback
+        const requestPromise = this.tryWithModelFallback(prompt, model);
         this.pendingRequests.set(cacheKey, requestPromise);
 
         try {
@@ -1027,5 +1035,72 @@ export class GeminiService {
         consecutiveFailures: this.serviceHealth.consecutiveFailures,
       },
     };
+  }
+
+  /**
+   * 🔄 MODEL FALLBACK: Try model with fallback mechanism
+   */
+  private async tryWithModelFallback(
+    prompt: string,
+    primaryModel: string,
+  ): Promise<string> {
+    const fallbackChain = this.getFallbackChain(primaryModel);
+
+    for (let i = 0; i < fallbackChain.length; i++) {
+      const model = fallbackChain[i];
+      const isLastAttempt = i === fallbackChain.length - 1;
+
+      try {
+        this.logger.log(
+          `🎯 Trying model: ${model} (attempt ${i + 1}/${fallbackChain.length})`,
+        );
+
+        const result = await this.executeOptimizedRequest(prompt, model);
+
+        if (i > 0) {
+          this.logger.log(
+            `✅ Fallback model ${model} succeeded after ${i} failed attempts`,
+          );
+        }
+
+        return result;
+      } catch (error) {
+        this.logger.warn(`⚠️ Model ${model} failed: ${error.message}`);
+
+        if (isLastAttempt) {
+          this.logger.error(`❌ All models in fallback chain failed`);
+          throw new Error(`All AI models failed. Last error: ${error.message}`);
+        }
+
+        // Don't wait before trying the next model in the chain
+        continue;
+      }
+    }
+  }
+
+  /**
+   * 🔄 Get fallback chain for a model
+   */
+  private getFallbackChain(primaryModel: string): string[] {
+    // For free models, try multiple free alternatives
+    if (
+      primaryModel.includes('free') ||
+      primaryModel.includes('gemini-flash')
+    ) {
+      return [
+        primaryModel,
+        AI_MODELS.FALLBACK_FREE,
+        'google/gemini-flash-1.5',
+        'openai/gpt-3.5-turbo',
+      ];
+    }
+
+    // For premium models, try premium alternatives then free fallback
+    return [
+      primaryModel,
+      AI_MODELS.FALLBACK_PREMIUM,
+      AI_MODELS.FALLBACK_FREE,
+      'google/gemini-flash-1.5',
+    ];
   }
 }

@@ -79,9 +79,9 @@ export class FileCompilerService {
 
           // Proceed with compilation using validated data
           return this.performCompilationWithRobustness(
-            validation.sanitizedData!.inputPath,
-            validation.sanitizedData!.outputPath,
-            validation.sanitizedData!.options,
+            validation.sanitizedData.inputPath,
+            validation.sanitizedData.outputPath,
+            validation.sanitizedData.options,
           );
         },
         // Fallback when circuit breaker is open
@@ -162,16 +162,13 @@ export class FileCompilerService {
 
       // Validate numeric options
       if (
-        sanitizedOptions.maxFileSize! <= 0 ||
-        sanitizedOptions.maxFileSize! > 50 * 1024 * 1024
+        sanitizedOptions.maxFileSize <= 0 ||
+        sanitizedOptions.maxFileSize > 50 * 1024 * 1024
       ) {
         errors.push('Max file size must be between 1 byte and 50MB');
       }
 
-      if (
-        sanitizedOptions.maxFiles! <= 0 ||
-        sanitizedOptions.maxFiles! > 10000
-      ) {
+      if (sanitizedOptions.maxFiles <= 0 || sanitizedOptions.maxFiles > 10000) {
         errors.push('Max files must be between 1 and 10000');
       }
 
@@ -234,7 +231,7 @@ export class FileCompilerService {
         }
 
         // Check if we've exceeded limits
-        if (stats.totalFiles >= options.maxFiles!) {
+        if (stats.totalFiles >= options.maxFiles) {
           this.logger.warn(`Maximum file limit reached: ${options.maxFiles}`);
           return;
         }
@@ -256,7 +253,7 @@ export class FileCompilerService {
                 if (
                   this.shouldExcludeDirectory(
                     entry.name,
-                    options.excludePatterns!,
+                    options.excludePatterns,
                   )
                 ) {
                   stats.skippedFiles++;
@@ -312,7 +309,7 @@ export class FileCompilerService {
         new Promise((_, reject) =>
           setTimeout(
             () => reject(new Error('Compilation timeout')),
-            options.timeout!,
+            options.timeout,
           ),
         ),
       ]);
@@ -411,7 +408,7 @@ ${'='.repeat(80)}
       const stats = await fs.stat(filePath);
 
       // Check file size
-      if (stats.size > options.maxFileSize!) {
+      if (stats.size > options.maxFileSize) {
         this.logger.warn(
           `File too large, skipping: ${filePath} (${stats.size} bytes)`,
         );
@@ -420,7 +417,7 @@ ${'='.repeat(80)}
 
       // Check file extension
       const ext = path.extname(filePath).toLowerCase();
-      if (!options.allowedExtensions!.includes(ext)) {
+      if (!options.allowedExtensions.includes(ext)) {
         return false;
       }
 
@@ -447,9 +444,9 @@ ${'='.repeat(80)}
       }
 
       // Truncate very large content for safety
-      if (fileContent.length > options.maxFileSize!) {
+      if (fileContent.length > options.maxFileSize) {
         return (
-          fileContent.substring(0, options.maxFileSize!) +
+          fileContent.substring(0, options.maxFileSize) +
           '\n[Content truncated - file too large]'
         );
       }

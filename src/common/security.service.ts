@@ -76,9 +76,22 @@ export class SecurityService {
         contentSecurityPolicy: {
           directives: {
             defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            scriptSrc: ["'self'"],
+            styleSrc: [
+              "'self'",
+              "'unsafe-inline'",
+              'https://cdnjs.cloudflare.com',
+            ],
+            scriptSrc: [
+              "'self'",
+              'https://cdnjs.cloudflare.com',
+              'https://cdn.socket.io',
+            ],
             imgSrc: ["'self'", 'data:', 'https:'],
+            connectSrc: [
+              "'self'",
+              'ws://localhost:3000',
+              'http://localhost:3000',
+            ],
           },
         },
         crossOriginEmbedderPolicy: false,

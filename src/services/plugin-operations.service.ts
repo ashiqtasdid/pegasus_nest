@@ -7,6 +7,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CreateRequestDto } from '../create/dto/create-request.dto';
 import { GeminiService } from './gemini.service';
 import { CodeCompilerService } from './code-compiler.service';
+import { PluginStatusGateway } from '../gateways/plugin-status.gateway';
 import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
@@ -27,6 +28,7 @@ export class PluginOperationsService {
   constructor(
     private readonly geminiService: GeminiService,
     private readonly codeCompilerService: CodeCompilerService,
+    private readonly pluginStatusGateway: PluginStatusGateway,
   ) {}
 
   async createPlugin(createData: CreateRequestDto): Promise<string> {
@@ -47,7 +49,16 @@ export class PluginOperationsService {
     const actions = this.extractCodeFixes(aiResponse);
 
     // Execute file actions
-    const actionsCount = await this.executeFileActions(actions, folderPath); // Compile the project with auto-fix and AI assistance enabled
+    const actionsCount = await this.executeFileActions(actions, folderPath);
+
+    // Emit initial compilation status via WebSocket
+    this.pluginStatusGateway.emitCompilationProgress(createData.name, {
+      stage: 'initialization',
+      percentage: 0,
+      message: 'Starting Maven compilation...',
+    });
+
+    // Compile the project with auto-fix and AI assistance enabled
     const compilationResult =
       await this.codeCompilerService.compileMavenProject(folderPath);
 
@@ -212,6 +223,13 @@ export class PluginOperationsService {
     this.logger.log(
       'Attempting to fix compilation errors using integrated AI system...',
     );
+
+    // Emit fix attempt status via WebSocket
+    this.pluginStatusGateway.emitCompilationProgress(createData.name, {
+      stage: 'retry',
+      percentage: 25,
+      message: `Attempting to fix compilation errors (attempt ${attempts + 1}/${maxAttempts})...`,
+    });
 
     try {
       // Use the integrated AI fixing system in CodeCompilerService

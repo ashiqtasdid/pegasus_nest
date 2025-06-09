@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pegasus Nest - Agent Feedback Dashboard</title>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <link href="styles.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Header -->
+      <header class="header">
+        <div class="header-content">
+          <h1><i class="fas fa-robot"></i> Pegasus Nest Agent Dashboard</h1>
+          <div class="connection-status">
+            <span id="connection-status" class="status-disconnected">
+              <i class="fas fa-circle"></i> Disconnected
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- Plugin Creation Form -->
+        <section class="creation-panel">
+          <div class="panel-header">
+            <h2><i class="fas fa-plus-circle"></i> Create Minecraft Plugin</h2>
+            <div class="feature-badges">
+              <span class="badge badge-success"
+                ><i class="fas fa-robot"></i> Multi-Agent AI</span
+              >
+              <span class="badge badge-info"
+                ><i class="fas fa-hammer"></i> Auto-Compile</span
+              >
+              <span class="badge badge-warning"
+                ><i class="fas fa-server"></i> Auto-Deploy</span
+              >
+            </div>
+          </div>
+          <div class="panel-content">
+            <form id="plugin-form" class="plugin-form">
+              <div class="form-group">
+                <label for="user-id">User ID:</label>
+                <input
+                  type="text"
+                  id="user-id"
+                  name="userId"
+                  placeholder="Enter your user ID"
+                  value="test-user"
+                  required
+                />
+              </div>
+              <div class="form-group">
+                <label for="plugin-name">Plugin Name:</label>
+                <input
+                  type="text"
+                  id="plugin-name"
+                  name="pluginName"
+                  placeholder="Enter plugin name (e.g., 'TeleportHome')"
+                  required
+                />
+              </div>
+              <div class="form-group">
+                <label for="plugin-prompt">Plugin Description:</label>
+                <textarea
+                  id="plugin-prompt"
+                  name="prompt"
+                  rows="4"
+                  placeholder="Describe your Minecraft plugin in detail. Examples:
+• 'Create a teleportation plugin where players can set and teleport to home locations'
+• 'Make a custom enchantment plugin with fire damage enchantments'
+• 'Build a player economy system with shops and currency'
+• 'Create a mini-game plugin with parkour challenges'"
+                  required
+                ></textarea>
+              </div>
+              <div class="form-group">
+                <label for="generation-mode">Generation System:</label>
+                <select id="generation-mode" name="generationMode">
+                  <option value="multi-agent" selected>
+                    🤖 Multi-Agent System (Recommended)
+                  </option>
+                  <option value="standard">⚡ Standard Creation</option>
+                </select>
+                <small class="help-text"
+                  >Multi-Agent system uses specialized AI agents for higher
+                  quality results</small
+                >
+              </div>
+              <div class="form-group">
+                <label for="accuracy-level">Accuracy Level:</label>
+                <select id="accuracy-level" name="accuracyLevel">
+                  <option value="high">High Accuracy</option>
+                  <option value="maximum" selected>Maximum Accuracy</option>
+                  <option value="ultra">Ultra Accuracy</option>
+                </select>
+              </div>
+              <button type="submit" id="create-btn" class="btn-primary">
+                <i class="fas fa-robot"></i> Create Plugin with AI Agents
+              </button>
+              <button type="button" id="example-btn" class="btn-secondary">
+                <i class="fas fa-lightbulb"></i> Load Example Plugin
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <!-- Progress Dashboard -->
+        <section
+          class="progress-panel"
+          id="progress-panel"
+          style="display: none"
+        >
+          <div class="panel-header">
+            <h2><i class="fas fa-chart-line"></i> Real-time Progress</h2>
+            <div class="session-info">
+              <span id="session-id">Session: <code>-</code></span>
+              <span id="plugin-name">Plugin: <code>-</code></span>
+            </div>
+          </div>
+          <div class="panel-content">
+            <!-- Overall Progress -->
+            <div class="progress-overview">
+              <div class="progress-bar-container">
+                <div class="progress-bar">
+                  <div id="overall-progress" class="progress-fill"></div>
+                </div>
+                <div class="progress-text">
+                  <span id="progress-percentage">0%</span>
+                  <span id="estimated-time">Estimated: 5m</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Phase Progress -->
+            <div class="phases-container">
+              <div class="phase-item" data-phase="analysis">
+                <div class="phase-header">
+                  <i class="fas fa-search"></i>
+                  <span class="phase-name">Analysis</span>
+                  <span class="phase-status">Pending</span>
+                </div>
+                <div class="phase-progress">
+                  <div class="progress-bar mini">
+                    <div class="progress-fill"></div>
+                  </div>
+                </div>
+                <div class="phase-tasks"></div>
+              </div>
+
+              <div class="phase-item" data-phase="optimization">
+                <div class="phase-header">
+                  <i class="fas fa-optimize"></i>
+                  <span class="phase-name">Optimization</span>
+                  <span class="phase-status">Pending</span>
+                </div>
+                <div class="phase-progress">
+                  <div class="progress-bar mini">
+                    <div class="progress-fill"></div>
+                  </div>
+                </div>
+                <div class="phase-tasks"></div>
+              </div>
+
+              <div class="phase-item" data-phase="generation">
+                <div class="phase-header">
+                  <i class="fas fa-code"></i>
+                  <span class="phase-name">Generation</span>
+                  <span class="phase-status">Pending</span>
+                </div>
+                <div class="phase-progress">
+                  <div class="progress-bar mini">
+                    <div class="progress-fill"></div>
+                  </div>
+                </div>
+                <div class="phase-tasks"></div>
+              </div>
+
+              <div class="phase-item" data-phase="quality">
+                <div class="phase-header">
+                  <i class="fas fa-check-circle"></i>
+                  <span class="phase-name">Quality Assurance</span>
+                  <span class="phase-status">Pending</span>
+                </div>
+                <div class="phase-progress">
+                  <div class="progress-bar mini">
+                    <div class="progress-fill"></div>
+                  </div>
+                </div>
+                <div class="phase-tasks"></div>
+              </div>
+
+              <div class="phase-item" data-phase="compilation">
+                <div class="phase-header">
+                  <i class="fas fa-hammer"></i>
+                  <span class="phase-name">Compilation</span>
+                  <span class="phase-status">Pending</span>
+                </div>
+                <div class="phase-progress">
+                  <div class="progress-bar mini">
+                    <div class="progress-fill"></div>
+                  </div>
+                </div>
+                <div class="phase-tasks"></div>
+              </div>
+
+              <div class="phase-item" data-phase="assessment">
+                <div class="phase-header">
+                  <i class="fas fa-clipboard-check"></i>
+                  <span class="phase-name">Assessment</span>
+                  <span class="phase-status">Pending</span>
+                </div>
+                <div class="phase-progress">
+                  <div class="progress-bar mini">
+                    <div class="progress-fill"></div>
+                  </div>
+                </div>
+                <div class="phase-tasks"></div>
+              </div>
+            </div>
+
+            <!-- Current Activity -->
+            <div class="current-activity">
+              <h3><i class="fas fa-clock"></i> Current Activity</h3>
+              <div id="current-message" class="activity-message">
+                Waiting for activity...
+              </div>
+            </div>
+
+            <!-- Agent Performance -->
+            <div class="agents-panel">
+              <h3><i class="fas fa-users"></i> Agent Performance</h3>
+              <div id="agents-container" class="agents-container">
+                <!-- Agents will be populated dynamically -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Activity Log -->
+        <section class="log-panel">
+          <div class="panel-header">
+            <h2><i class="fas fa-history"></i> Activity Log</h2>
+            <button id="clear-log-btn" class="btn-secondary">
+              <i class="fas fa-trash"></i> Clear
+            </button>
+          </div>
+          <div class="panel-content">
+            <div id="activity-log" class="activity-log"></div>
+          </div>
+        </section>
+
+        <!-- Results Panel -->
+        <section class="results-panel" id="results-panel" style="display: none">
+          <div class="panel-header">
+            <h2><i class="fas fa-trophy"></i> Plugin Created Successfully!</h2>
+          </div>
+          <div class="panel-content">
+            <div id="results-content" class="results-content">
+              <!-- Results will be populated dynamically -->
+            </div>
+            <div class="results-actions">
+              <button id="download-btn" class="btn-primary">
+                <i class="fas fa-download"></i> Download Plugin
+              </button>
+              <button id="new-plugin-btn" class="btn-secondary">
+                <i class="fas fa-plus"></i> Create Another
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Error Toast -->
+      <div id="error-toast" class="toast error-toast" style="display: none">
+        <div class="toast-content">
+          <i class="fas fa-exclamation-triangle"></i>
+          <span id="error-message">Error message</span>
+        </div>
+        <button class="toast-close" onclick="hideErrorToast()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <!-- Success Toast -->
+      <div id="success-toast" class="toast success-toast" style="display: none">
+        <div class="toast-content">
+          <i class="fas fa-check-circle"></i>
+          <span id="success-message">Success message</span>
+        </div>
+        <button class="toast-close" onclick="hideSuccessToast()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Scripts -->
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.min.js"
+      onerror="loadFallbackSocketIO()"
+    ></script>
+    <script>
+      // Fallback Socket.IO loading
+      function loadFallbackSocketIO() {
+        console.warn('Primary Socket.IO CDN failed, trying fallback...');
+        const script = document.createElement('script');
+        script.src = 'https://cdn.socket.io/4.8.1/socket.io.min.js';
+        script.onerror = function () {
+          console.error('All Socket.IO CDNs failed to load');
+          // Show error message to user
+          document.addEventListener('DOMContentLoaded', function () {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText =
+              'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#f44747;color:white;padding:10px 20px;border-radius:5px;z-index:9999;';
+            errorDiv.textContent =
+              '⚠️ Network Error: Unable to load WebSocket library. Please check your internet connection.';
+            document.body.appendChild(errorDiv);
+          });
+        };
+        document.head.appendChild(script);
+      }
+
+      // Check if Socket.IO loaded after DOM content loads
+      document.addEventListener('DOMContentLoaded', function () {
+        setTimeout(function () {
+          if (typeof io === 'undefined') {
+            console.error('Socket.IO still not available after DOM load');
+            loadFallbackSocketIO();
+          }
+        }, 1000);
+      });
+    </script>
+    <script src="script.js"></script>
+  </body>
+</html>

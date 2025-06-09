@@ -1,9 +1,8 @@
-/* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
+
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+
 import { Injectable, Logger } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
 import { FileCompilerService } from './file-compiler.service';
@@ -13,6 +12,7 @@ import {
   ChatClassificationService,
   ChatIntentType,
 } from './chat-classification.service';
+import { PluginStatusGateway } from '../gateways/plugin-status.gateway';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -32,6 +32,7 @@ export class PluginChatService {
     private readonly codeCompilerService: CodeCompilerService,
     private readonly promptRefinementService: PromptRefinementService,
     private readonly chatClassificationService: ChatClassificationService,
+    private readonly pluginStatusGateway: PluginStatusGateway,
   ) {}
   /**
    * Enhanced chat response with intelligent classification and routing
@@ -549,7 +550,7 @@ Remember: Only output valid JSON with no additional text. The path should be rel
 
       // Strategy 2: Try to find complete JSON block with balanced braces
       const jsonRegex = /{[\s\S]*}/;
-      let match = cleanResponse.match(jsonRegex);
+      const match = cleanResponse.match(jsonRegex);
 
       if (match) {
         let jsonStr = match[0];
@@ -804,13 +805,25 @@ ${results.join('\n')}
     pluginFolderPath: string,
   ): Promise<void> {
     try {
+      // Extract plugin name from folder path for WebSocket notifications
+      const pluginName = path.basename(pluginFolderPath);
+
       // Delete target folder if it exists
       const targetPath = path.join(pluginFolderPath, 'target');
       if (fs.existsSync(targetPath)) {
         this.logger.log(`Deleting target folder: ${targetPath}`);
         fs.rmSync(targetPath, { recursive: true, force: true });
         this.logger.log('Target folder deleted successfully');
-      } // Use CodeCompilerService with AI fixing enabled for better error handling
+      }
+
+      // Emit recompilation start via WebSocket
+      this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+        stage: 'initialization',
+        percentage: 0,
+        message: 'Starting plugin recompilation after modifications...',
+      });
+
+      // Use CodeCompilerService with AI fixing enabled for better error handling
       this.logger.log(`Recompiling plugin at: ${pluginFolderPath}`);
       const result =
         await this.codeCompilerService.compileMavenProject(pluginFolderPath);
@@ -818,9 +831,28 @@ ${results.join('\n')}
       if (!result.success) {
         this.logger.error(`Maven compilation failed: ${result.error}`);
         this.logger.error(`Maven output: ${result.output}`);
+
+        // Emit compilation failure via WebSocket
+        this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+          stage: 'error',
+          percentage: 0,
+          message: 'Plugin recompilation failed',
+          success: false,
+          error: result.error,
+        });
+
         throw new Error(`Maven compilation failed: ${result.error}`);
       }
+
       this.logger.log('Maven compilation successful');
+
+      // Emit successful completion via WebSocket
+      this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+        stage: 'complete',
+        percentage: 100,
+        message: 'Plugin recompilation completed successfully!',
+        success: true,
+      });
     } catch (error) {
       this.logger.error(`Error during clean and recompile: ${error.message}`);
       throw error;

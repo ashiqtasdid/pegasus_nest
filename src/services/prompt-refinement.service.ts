@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { Injectable, Logger } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
 
@@ -141,7 +140,7 @@ Return ONLY the JSON response, no additional text.
   }
 
   /**
-   * Parses the AI analysis response
+   * Parses the AI analysis response with robust error handling
    */
   private parseAnalysis(aiResponse: string): {
     features: string[];
@@ -153,27 +152,94 @@ Return ONLY the JSON response, no additional text.
     implementationNotes: string[];
   } {
     try {
-      // Extract JSON from response
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      // Strategy 1: Clean the response
+      let cleanResponse = aiResponse.trim();
+      cleanResponse = cleanResponse.replace(/^\uFEFF/, ''); // Remove BOM
+
+      // Remove markdown code blocks
+      cleanResponse = cleanResponse
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '');
+
+      // Strategy 2: Extract JSON with balanced braces
+      const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        throw new Error('No JSON found in AI response');
+        this.logger.warn(
+          'No JSON found in AI analysis response, using fallback',
+        );
+        return this.createFallbackAnalysis();
       }
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      let jsonStr = jsonMatch[0];
+
+      // Strategy 3: Balance braces to find complete JSON
+      let braceCount = 0;
+      let lastValidEnd = -1;
+      for (let i = 0; i < jsonStr.length; i++) {
+        if (jsonStr[i] === '{') {
+          braceCount++;
+        } else if (jsonStr[i] === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            lastValidEnd = i;
+            break;
+          }
+        }
+      }
+
+      if (lastValidEnd > 0) {
+        jsonStr = jsonStr.substring(0, lastValidEnd + 1);
+      }
+
+      // Strategy 4: Clean JSON string
+      jsonStr = this.cleanAnalysisJsonString(jsonStr);
+
+      const parsed = JSON.parse(jsonStr);
 
       return {
-        features: parsed.features || [],
-        commands: parsed.commands || [],
-        events: parsed.events || [],
-        complexity: parsed.complexity || 'medium',
-        dependencies: parsed.dependencies || [],
-        description: parsed.description || '',
-        implementationNotes: parsed.implementation_notes || [],
+        features: Array.isArray(parsed.features) ? parsed.features : [],
+        commands: Array.isArray(parsed.commands) ? parsed.commands : [],
+        events: Array.isArray(parsed.events) ? parsed.events : [],
+        complexity: ['simple', 'medium', 'complex'].includes(parsed.complexity)
+          ? parsed.complexity
+          : 'medium',
+        dependencies: Array.isArray(parsed.dependencies)
+          ? parsed.dependencies
+          : [],
+        description:
+          typeof parsed.description === 'string' ? parsed.description : '',
+        implementationNotes: Array.isArray(parsed.implementation_notes)
+          ? parsed.implementation_notes
+          : Array.isArray(parsed.implementationNotes)
+            ? parsed.implementationNotes
+            : [],
       };
     } catch (error) {
       this.logger.warn(`Failed to parse AI analysis: ${error.message}`);
+      this.logger.debug(
+        `Raw response (first 300 chars): ${aiResponse.substring(0, 300)}`,
+      );
       return this.createFallbackAnalysis();
     }
+  }
+
+  /**
+   * Clean JSON string for analysis parsing
+   */
+  private cleanAnalysisJsonString(jsonStr: string): string {
+    // Remove control characters except \t, \n, \r
+    jsonStr = jsonStr.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+    // Fix unescaped newlines in string values
+    jsonStr = jsonStr.replace(
+      /"([^"]*?)(\n)([^"]*?)"/g,
+      (match, before, newline, after) => `"${before}\\n${after}"`,
+    );
+
+    // Fix trailing commas
+    jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+
+    return jsonStr;
   }
 
   /**

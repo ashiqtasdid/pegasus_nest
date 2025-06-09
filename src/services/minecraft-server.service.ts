@@ -2,8 +2,10 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { RobustnessService } from '../common/robustness.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import Docker from 'dockerode';
 
 const execPromise = promisify(exec);
 
@@ -53,8 +55,12 @@ export class MinecraftServerService implements OnModuleDestroy {
   private readonly serverRegistry = new Map<string, ServerStatus>();
   private readonly serverCleanupInterval: NodeJS.Timeout;
   private readonly playerMonitoringInterval: NodeJS.Timeout;
+  private readonly docker: Docker;
 
   constructor(private readonly robustnessService: RobustnessService) {
+    // Initialize Docker client
+    this.docker = new Docker();
+
     // Initialize service
     this.logger.log('Minecraft Server Service initialized');
 
@@ -74,7 +80,7 @@ export class MinecraftServerService implements OnModuleDestroy {
       2 * 60 * 1000,
     );
 
-    this.logger.log('Minecraft Server Service initialized');
+    this.logger.log('Minecraft Server Service initialized with Docker API');
   }
 
   async onModuleDestroy() {
@@ -143,7 +149,6 @@ export class MinecraftServerService implements OnModuleDestroy {
       throw error;
     }
   }
-
   /**
    * Start a Minecraft server
    */
@@ -158,7 +163,9 @@ export class MinecraftServerService implements OnModuleDestroy {
       this.serverRegistry.set(serverId, server);
 
       if (server.containerId) {
-        await execPromise(`docker start ${server.containerId}`);
+        // Use Docker API instead of shell command
+        const container = this.docker.getContainer(server.containerId);
+        await container.start();
 
         // Wait for server to be ready
         await this.waitForServerReady(server.port);
@@ -180,7 +187,6 @@ export class MinecraftServerService implements OnModuleDestroy {
       throw error;
     }
   }
-
   /**
    * Stop a Minecraft server
    */
@@ -195,6 +201,8 @@ export class MinecraftServerService implements OnModuleDestroy {
       this.serverRegistry.set(serverId, server);
 
       if (server.containerId) {
+        const container = this.docker.getContainer(server.containerId);
+
         // Graceful shutdown with RCON command
         try {
           await this.sendRconCommand(server.port, 'stop');
@@ -206,8 +214,15 @@ export class MinecraftServerService implements OnModuleDestroy {
           );
         }
 
-        // Force stop container if still running
-        await execPromise(`docker stop ${server.containerId}`);
+        // Use Docker API to stop container gracefully
+        try {
+          await container.stop({ t: 30 }); // Give 30 seconds for graceful shutdown
+        } catch (stopError) {
+          this.logger.warn(
+            `Graceful stop failed, forcing container stop: ${stopError}`,
+          );
+          await container.kill(); // Force kill if graceful stop fails
+        }
       }
 
       server.status = 'stopped';
@@ -255,7 +270,6 @@ export class MinecraftServerService implements OnModuleDestroy {
 
     this.logger.log(`Updated plugins for server ${serverId}`);
   }
-
   /**
    * Remove a Minecraft server completely
    */
@@ -271,9 +285,16 @@ export class MinecraftServerService implements OnModuleDestroy {
         await this.stopServer(serverId);
       }
 
-      // Remove container
+      // Remove container using Docker API
       if (server.containerId) {
-        await execPromise(`docker rm -f ${server.containerId}`).catch(() => {});
+        try {
+          const container = this.docker.getContainer(server.containerId);
+          await container.remove({ force: true });
+        } catch (removeError) {
+          this.logger.warn(
+            `Failed to remove container ${server.containerId}: ${removeError}`,
+          );
+        }
       }
 
       // Remove server files
@@ -378,7 +399,6 @@ export class MinecraftServerService implements OnModuleDestroy {
       throw error;
     }
   }
-
   /**
    * Get server logs
    */
@@ -393,10 +413,18 @@ export class MinecraftServerService implements OnModuleDestroy {
 
     try {
       if (server.containerId) {
-        const { stdout } = await execPromise(
-          `docker logs --tail ${lines} ${server.containerId}`,
-        );
-        return stdout.split('\n').filter((line) => line.trim() !== '');
+        // Use Docker API to get logs
+        const container = this.docker.getContainer(server.containerId);
+        const logStream = await container.logs({
+          stdout: true,
+          stderr: true,
+          tail: lines,
+          timestamps: false,
+        });
+
+        // Convert stream buffer to string and split into lines
+        const logs = logStream.toString('utf8');
+        return logs.split('\n').filter((line) => line.trim() !== '');
       } else {
         // Fallback to file logs
         const serverPath = this.getServerPath(server.userId, serverId);
@@ -559,9 +587,7 @@ export class MinecraftServerService implements OnModuleDestroy {
       );
       throw error;
     }
-  }
-
-  /**
+  } /**
    * Get server metrics and performance data
    */
   async getServerMetrics(serverId: string): Promise<any> {
@@ -583,21 +609,41 @@ export class MinecraftServerService implements OnModuleDestroy {
       // Get container stats if available
       if (server.containerId && server.status === 'running') {
         try {
-          const { stdout } = await execPromise(
-            `docker stats ${server.containerId} --no-stream --format "table {{.CPUPerc}}\\t{{.MemUsage}}\\t{{.NetIO}}\\t{{.BlockIO}}"`,
-          );
-          const lines = stdout.trim().split('\n');
-          if (lines.length > 1) {
-            const stats = lines[1].split('\t');
-            metrics.cpuUsage = stats[0];
-            metrics.memoryUsage = stats[1];
-            metrics.networkIO = stats[2];
-            metrics.blockIO = stats[3];
+          // Use Docker API to get container stats
+          const container = this.docker.getContainer(server.containerId);
+          const statsStream = await container.stats({ stream: false });
+
+          if (statsStream) {
+            // Parse Docker stats
+            metrics.cpuUsage = this.calculateCpuUsage(statsStream);
+            metrics.memoryUsage = this.formatMemoryUsage(
+              statsStream.memory_stats,
+            );
+            metrics.networkIO = this.formatNetworkIO(statsStream.networks);
+            metrics.blockIO = this.formatBlockIO(statsStream.blkio_stats);
           }
         } catch (dockerError) {
           this.logger.warn(
             `Failed to get Docker stats for ${serverId}: ${dockerError}`,
           );
+          // Fallback to shell command if Docker API fails
+          try {
+            const { stdout } = await execPromise(
+              `docker stats ${server.containerId} --no-stream --format "table {{.CPUPerc}}\\t{{.MemUsage}}\\t{{.NetIO}}\\t{{.BlockIO}}"`,
+            );
+            const lines = stdout.trim().split('\n');
+            if (lines.length > 1) {
+              const stats = lines[1].split('\t');
+              metrics.cpuUsage = stats[0];
+              metrics.memoryUsage = stats[1];
+              metrics.networkIO = stats[2];
+              metrics.blockIO = stats[3];
+            }
+          } catch (fallbackError) {
+            this.logger.warn(
+              `Fallback stats collection also failed: ${fallbackError}`,
+            );
+          }
         }
 
         // Get player list
@@ -767,10 +813,8 @@ export class MinecraftServerService implements OnModuleDestroy {
   private async createServerStructure(
     config: MinecraftServerConfig,
   ): Promise<string> {
-    const serverPath = this.getServerPath(
-      config.userId,
-      `${config.userId}_${config.serverName}`,
-    );
+    // New unified structure: generated/{userId}/server/
+    const serverPath = this.getServerPath(config.userId, config.serverName);
 
     // Create directory structure
     const dirs = [
@@ -786,11 +830,13 @@ export class MinecraftServerService implements OnModuleDestroy {
       }
     }
 
+    this.logger.log(`Created server structure at: ${serverPath}`);
     return serverPath;
   }
 
   private getServerPath(userId: string, serverId: string): string {
-    return path.join(process.cwd(), 'minecraft_servers', userId, serverId);
+    // New unified directory structure: generated/{userId}/server/
+    return path.join(process.cwd(), 'generated', userId, 'server');
   }
 
   private async installUserPlugins(
@@ -798,24 +844,27 @@ export class MinecraftServerService implements OnModuleDestroy {
     serverPath: string,
     specificPlugins?: string[],
   ): Promise<void> {
-    const userPluginsPath = path.join(process.cwd(), 'generated', userId);
+    // New unified structure: plugins are in generated/{userId}/{pluginName}/
+    const userGeneratedPath = path.join(process.cwd(), 'generated', userId);
     const serverPluginsPath = path.join(serverPath, 'plugins');
 
-    if (!fs.existsSync(userPluginsPath)) {
-      this.logger.warn(`No plugins found for user ${userId}`);
+    if (!fs.existsSync(userGeneratedPath)) {
+      this.logger.warn(`No generated directory found for user ${userId}`);
       return;
     }
 
+    // Get all available plugins (directories that are not 'server')
     const availablePlugins = fs
-      .readdirSync(userPluginsPath)
-      .filter((item) =>
-        fs.statSync(path.join(userPluginsPath, item)).isDirectory(),
-      );
+      .readdirSync(userGeneratedPath)
+      .filter((item) => {
+        const itemPath = path.join(userGeneratedPath, item);
+        return fs.statSync(itemPath).isDirectory() && item !== 'server';
+      });
 
     const pluginsToInstall = specificPlugins || availablePlugins;
 
     for (const pluginName of pluginsToInstall) {
-      const pluginSourcePath = path.join(userPluginsPath, pluginName);
+      const pluginSourcePath = path.join(userGeneratedPath, pluginName);
       const jarPath = path.join(pluginSourcePath, 'target');
 
       if (fs.existsSync(jarPath)) {
@@ -830,10 +879,18 @@ export class MinecraftServerService implements OnModuleDestroy {
           const destJar = path.join(serverPluginsPath, jarFiles[0]);
 
           fs.copyFileSync(sourceJar, destJar);
-          this.logger.log(`Installed plugin: ${jarFiles[0]}`);
+          this.logger.log(`Installed plugin: ${jarFiles[0]} to server`);
+        } else {
+          this.logger.warn(`No compiled JAR found for plugin: ${pluginName}`);
         }
+      } else {
+        this.logger.warn(
+          `Target directory not found for plugin: ${pluginName}`,
+        );
       }
     }
+
+    this.logger.log(`Plugin installation completed for user ${userId}`);
   }
 
   private async generateServerConfig(
@@ -877,11 +934,9 @@ level-type=default
     const startScript = `#!/bin/bash
 java -Xmx${memoryLimit} -Xms${memoryLimit} ${javaArgs.join(' ')} -jar server.jar nogui
 `;
-
     fs.writeFileSync(path.join(serverPath, 'start.sh'), startScript);
-    await execPromise(`chmod +x ${path.join(serverPath, 'start.sh')}`);
+    await this.makeFileExecutable(path.join(serverPath, 'start.sh'));
   }
-
   private async createServerContainer(
     config: MinecraftServerConfig,
     serverPath: string,
@@ -895,30 +950,52 @@ java -Xmx${memoryLimit} -Xms${memoryLimit} ${javaArgs.join(' ')} -jar server.jar
       await this.downloadMinecraftServer(serverJarPath);
     }
 
-    // Create Docker command
-    const dockerCmd = `
-      docker run -d 
-      --name ${containerName}
-      --restart unless-stopped
-      -p ${config.port}:${config.port}
-      -p ${config.port + 1000}:${config.port + 1000}
-      -v "${serverPath}:/minecraft"
-      -w /minecraft
-      -m ${memoryLimit}
-      --memory-swap ${memoryLimit}
-      openjdk:17-jdk-slim
-      bash -c "java -Xmx${memoryLimit} -Xms${memoryLimit} -jar server.jar nogui"
-    `
-      .replace(/\s+/g, ' ')
-      .trim();
+    try {
+      // Use Docker API to create container
+      const memoryBytes = this.parseMemoryLimit(memoryLimit);
 
-    const { stdout } = await execPromise(dockerCmd);
-    const containerId = stdout.trim();
+      const containerConfig = {
+        Image: 'openjdk:17-jdk-slim',
+        name: containerName,
+        ExposedPorts: {
+          [`${config.port}/tcp`]: {},
+          [`${config.port + 1000}/tcp`]: {},
+        },
+        HostConfig: {
+          PortBindings: {
+            [`${config.port}/tcp`]: [{ HostPort: config.port.toString() }],
+            [`${config.port + 1000}/tcp`]: [
+              { HostPort: (config.port + 1000).toString() },
+            ],
+          },
+          Binds: [`${serverPath}:/minecraft`],
+          WorkingDir: '/minecraft',
+          Memory: memoryBytes,
+          MemorySwap: memoryBytes,
+          RestartPolicy: {
+            Name: 'unless-stopped',
+          },
+        },
+        Cmd: [
+          'bash',
+          '-c',
+          `java -Xmx${memoryLimit} -Xms${memoryLimit} -jar server.jar nogui`,
+        ],
+      };
 
-    this.logger.log(
-      `Created container ${containerId} for server ${config.serverName}`,
-    );
-    return containerId;
+      const container = await this.docker.createContainer(containerConfig);
+      const containerId = container.id;
+
+      this.logger.log(
+        `Created container ${containerId} for server ${config.serverName}`,
+      );
+      return containerId;
+    } catch (error) {
+      this.logger.error(
+        `Failed to create container for ${config.serverName}: ${error}`,
+      );
+      throw error;
+    }
   }
 
   private async downloadMinecraftServer(jarPath: string): Promise<void> {
@@ -1023,18 +1100,21 @@ java -Xmx${memoryLimit} -Xms${memoryLimit} ${javaArgs.join(' ')} -jar server.jar
             await this.stopServer(serverId);
             continue;
           }
-        }
-
-        // Clean up old stopped servers
+        } // Clean up old stopped servers
         if (
           now - server.lastSeen.getTime() > inactiveThreshold &&
           server.status === 'stopped'
         ) {
-          // Remove container
+          // Remove container using Docker API
           if (server.containerId) {
-            await execPromise(`docker rm -f ${server.containerId}`).catch(
-              () => {},
-            );
+            try {
+              const container = this.docker.getContainer(server.containerId);
+              await container.remove({ force: true });
+            } catch (removeError) {
+              this.logger.warn(
+                `Failed to remove container ${server.containerId}: ${removeError}`,
+              );
+            }
           }
 
           // Remove from registry
@@ -1047,7 +1127,6 @@ java -Xmx${memoryLimit} -Xms${memoryLimit} ${javaArgs.join(' ')} -jar server.jar
       }
     }
   }
-
   private async stopAllServers(): Promise<void> {
     const promises = Array.from(this.serverRegistry.keys()).map((serverId) =>
       this.stopServer(serverId).catch((error) =>
@@ -1056,5 +1135,387 @@ java -Xmx${memoryLimit} -Xms${memoryLimit} ${javaArgs.join(' ')} -jar server.jar
     );
 
     await Promise.all(promises);
+  }
+
+  /**
+   * Helper method to parse memory limit string to bytes
+   */
+  private parseMemoryLimit(memoryStr: string): number {
+    const match = memoryStr.match(/^(\d+)([GMK]?)$/i);
+    if (!match) {
+      throw new Error(`Invalid memory format: ${memoryStr}`);
+    }
+
+    const value = parseInt(match[1], 10);
+    const unit = match[2]?.toUpperCase() || '';
+
+    switch (unit) {
+      case 'G':
+        return value * 1024 * 1024 * 1024;
+      case 'M':
+        return value * 1024 * 1024;
+      case 'K':
+        return value * 1024;
+      default:
+        return value;
+    }
+  }
+
+  /**
+   * Calculate CPU usage percentage from Docker stats
+   */
+  private calculateCpuUsage(stats: any): string {
+    if (!stats.cpu_stats || !stats.precpu_stats) {
+      return '0%';
+    }
+
+    const cpuDelta =
+      stats.cpu_stats.cpu_usage.total_usage -
+      stats.precpu_stats.cpu_usage.total_usage;
+    const systemDelta =
+      stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+    const cpuCount = stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
+
+    if (systemDelta > 0 && cpuDelta > 0) {
+      const cpuPercent = (cpuDelta / systemDelta) * cpuCount * 100;
+      return `${cpuPercent.toFixed(2)}%`;
+    }
+
+    return '0%';
+  }
+
+  /**
+   * Format memory usage from Docker stats
+   */
+  private formatMemoryUsage(memStats: any): string {
+    if (!memStats) {
+      return '0B / 0B';
+    }
+
+    const usage = memStats.usage || 0;
+    const limit = memStats.limit || 0;
+
+    return `${this.formatBytes(usage)} / ${this.formatBytes(limit)}`;
+  }
+
+  /**
+   * Format network I/O from Docker stats
+   */
+  private formatNetworkIO(networks: any): string {
+    if (!networks) {
+      return '0B / 0B';
+    }
+
+    let rxBytes = 0;
+    let txBytes = 0;
+
+    Object.values(networks).forEach((network: any) => {
+      rxBytes += network.rx_bytes || 0;
+      txBytes += network.tx_bytes || 0;
+    });
+
+    return `${this.formatBytes(rxBytes)} / ${this.formatBytes(txBytes)}`;
+  }
+
+  /**
+   * Format block I/O from Docker stats
+   */
+  private formatBlockIO(blkioStats: any): string {
+    if (!blkioStats || !blkioStats.io_service_bytes_recursive) {
+      return '0B / 0B';
+    }
+
+    let readBytes = 0;
+    let writeBytes = 0;
+
+    blkioStats.io_service_bytes_recursive.forEach((stat: any) => {
+      if (stat.op === 'Read') {
+        readBytes += stat.value || 0;
+      } else if (stat.op === 'Write') {
+        writeBytes += stat.value || 0;
+      }
+    });
+
+    return `${this.formatBytes(readBytes)} / ${this.formatBytes(writeBytes)}`;
+  }
+
+  /**
+   * Helper method to format bytes into human-readable format
+   */
+  private formatBytes(bytes: number): string {
+    if (bytes === 0) return '0B';
+
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))}${sizes[i]}`;
+  }
+
+  /**
+   * Automatically provision a server for a user if they don't have one
+   * This is called when a user creates their first plugin
+   */
+  async autoProvisionUserServer(userId: string): Promise<ServerStatus | null> {
+    try {
+      // Check if user already has a server
+      const existingServers = await this.getUserServers(userId);
+      if (existingServers.length > 0) {
+        this.logger.log(`User ${userId} already has a server`);
+        return existingServers[0]; // Return the first server
+      }
+
+      this.logger.log(`Auto-provisioning server for user ${userId}`);
+
+      // Get next available port
+      const port = await this.getNextAvailablePort();
+
+      // Create server configuration
+      const serverConfig: MinecraftServerConfig = {
+        userId: userId,
+        serverName: `${userId}_server`,
+        port: port,
+        maxPlayers: 20,
+        gameMode: 'survival',
+        difficulty: 'normal',
+        enableWhitelist: false,
+        memoryLimit: '2G',
+        javaArgs: ['-XX:+UseG1GC', '-XX:+UnlockExperimentalVMOptions'],
+        plugins: [], // Will be populated by installUserPlugins
+      };
+
+      // Create the server
+      const serverStatus = await this.createUserServer(serverConfig);
+
+      this.logger.log(
+        `Auto-provisioned server ${serverStatus.id} for user ${userId}`,
+      );
+      return serverStatus;
+    } catch (error) {
+      this.logger.error(
+        `Failed to auto-provision server for user ${userId}:`,
+        error,
+      );
+      return null; // Don't throw error, just log and return null
+    }
+  }
+
+  /**
+   * Get next available port for server creation
+   */
+  private async getNextAvailablePort(): Promise<number> {
+    const startPort = 25565;
+    const maxPort = 25665;
+
+    for (let port = startPort; port <= maxPort; port++) {
+      let isPortUsed = false;
+
+      // Check if port is already used by any server
+      for (const [_, server] of this.serverRegistry) {
+        if (server.port === port) {
+          isPortUsed = true;
+          break;
+        }
+      }
+
+      if (!isPortUsed) {
+        return port;
+      }
+    }
+
+    throw new Error(
+      `No available ports found between ${startPort} and ${maxPort}`,
+    );
+  }
+
+  /**
+   * Check container health and status
+   */
+  private async checkContainerHealth(containerId: string): Promise<boolean> {
+    try {
+      const container = this.docker.getContainer(containerId);
+      const info = await container.inspect();
+
+      return info.State.Running && !info.State.Paused && !info.State.Restarting;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to check container health ${containerId}: ${error}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Get detailed container information
+   */
+  private async getContainerInfo(containerId: string): Promise<any> {
+    try {
+      const container = this.docker.getContainer(containerId);
+      const info = await container.inspect();
+
+      return {
+        id: info.Id,
+        name: info.Name,
+        state: info.State,
+        created: info.Created,
+        image: info.Config.Image,
+        ports: info.NetworkSettings.Ports,
+        mounts: info.Mounts,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to get container info ${containerId}: ${error}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Sync server registry with actual Docker containers
+   */
+  private async syncRegistryWithContainers(): Promise<void> {
+    try {
+      const containers = await this.docker.listContainers({ all: true });
+
+      for (const containerInfo of containers) {
+        const serverName = this.extractServerNameFromContainer(containerInfo);
+        if (serverName) {
+          await this.updateServerStatusFromContainer(serverName, containerInfo);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Failed to sync registry with containers: ${error}`);
+    }
+  }
+
+  /**
+   * Extract server name from container information
+   */
+  private extractServerNameFromContainer(containerInfo: any): string | null {
+    try {
+      const containerName = containerInfo.Names[0]?.replace('/', '');
+      if (containerName && containerName.startsWith('minecraft-')) {
+        // Expected format: minecraft-{userId}-{serverName}
+        const parts = containerName.split('-');
+        if (parts.length >= 3) {
+          const userId = parts[1];
+          const serverName = parts.slice(2).join('-');
+          return `${userId}_${serverName}`;
+        }
+      }
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Update server status based on container information
+   */
+  private async updateServerStatusFromContainer(
+    serverId: string,
+    containerInfo: any,
+  ): Promise<void> {
+    try {
+      let server = this.serverRegistry.get(serverId);
+
+      if (!server) {
+        // Create server entry if it doesn't exist in registry
+        const containerName = containerInfo.Names[0]?.replace('/', '');
+        const parts = containerName.split('-');
+        if (parts.length >= 3) {
+          const userId = parts[1];
+          const serverName = parts.slice(2).join('-');
+
+          server = {
+            id: serverId,
+            userId: userId,
+            status: 'stopped',
+            port: 25565, // Default, should be extracted from container config
+            playerCount: 0,
+            maxPlayers: 20,
+            uptime: 0,
+            lastSeen: new Date(),
+            lastPlayerActivity: new Date(),
+            autoShutdown: true,
+            inactiveShutdownMinutes: 10,
+            containerId: containerInfo.Id,
+            serverName: serverName,
+          };
+        } else {
+          return;
+        }
+      }
+
+      // Update status based on container state
+      switch (containerInfo.State) {
+        case 'running':
+          server.status = 'running';
+          server.lastSeen = new Date();
+          break;
+        case 'exited':
+        case 'stopped':
+          server.status = 'stopped';
+          break;
+        case 'paused':
+          server.status = 'stopped';
+          break;
+        case 'restarting':
+          server.status = 'starting';
+          break;
+        default:
+          server.status = 'error';
+      }
+
+      server.containerId = containerInfo.Id;
+      this.serverRegistry.set(serverId, server);
+      await this.saveServerStatus(server);
+    } catch (error) {
+      this.logger.error(
+        `Failed to update server status from container: ${error}`,
+      );
+    }
+  }
+
+  /**
+   * Monitor container health for all registered servers
+   */
+  private async monitorContainerHealth(): Promise<void> {
+    for (const [serverId, server] of this.serverRegistry) {
+      if (server.containerId && server.status === 'running') {
+        const isHealthy = await this.checkContainerHealth(server.containerId);
+
+        if (!isHealthy) {
+          this.logger.warn(
+            `Container health check failed for server ${serverId}`,
+          );
+          server.status = 'error';
+          server.error = 'Container health check failed';
+          this.serverRegistry.set(serverId, server);
+          await this.saveServerStatus(server);
+        }
+      }
+    }
+  }
+
+  /**
+   * Cross-platform method to make a file executable
+   */
+  private async makeFileExecutable(filePath: string): Promise<void> {
+    try {
+      if (os.platform() === 'win32') {
+        // On Windows, we don't need to set execute permissions
+        // The file will be executable based on its content
+        this.logger.debug(`Skipping chmod on Windows for: ${filePath}`);
+        return;
+      } else {
+        // On Unix-like systems (Linux, macOS), use chmod
+        await execPromise(`chmod +x "${filePath}"`);
+        this.logger.debug(`Made file executable: ${filePath}`);
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to make file executable ${filePath}: ${error}`);
+      // Don't throw error as this is not critical for Docker deployment
+    }
   }
 }

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable, Logger } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
@@ -307,7 +306,6 @@ Examples:
 
 Analyze the message and respond with JSON only.`;
   }
-
   /**
    * Parses the AI response and validates the classification result
    */
@@ -315,25 +313,51 @@ Analyze the message and respond with JSON only.`;
     response: string,
   ): ChatClassificationResult {
     try {
-      // Clean the response to extract JSON
+      // Strategy 1: Clean the response to extract JSON
       let cleanResponse = response.trim();
+      cleanResponse = cleanResponse.replace(/^\uFEFF/, ''); // Remove BOM
 
       // Remove any markdown code blocks
       cleanResponse = cleanResponse
         .replace(/```json\n?/g, '')
         .replace(/```\n?/g, '');
 
-      // Extract JSON object
+      // Strategy 2: Extract JSON object with balanced braces
       const jsonMatch = cleanResponse.match(/{[\s\S]*}/);
       if (!jsonMatch) {
         throw new Error('No JSON found in AI response');
       }
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      let jsonStr = jsonMatch[0];
+
+      // Strategy 3: Balance braces to find complete JSON
+      let braceCount = 0;
+      let lastValidEnd = -1;
+      for (let i = 0; i < jsonStr.length; i++) {
+        if (jsonStr[i] === '{') {
+          braceCount++;
+        } else if (jsonStr[i] === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            lastValidEnd = i;
+            break;
+          }
+        }
+      }
+
+      if (lastValidEnd > 0) {
+        jsonStr = jsonStr.substring(0, lastValidEnd + 1);
+      }
+
+      // Strategy 4: Clean JSON string
+      jsonStr = this.cleanClassificationJsonString(jsonStr);
+
+      const parsed = JSON.parse(jsonStr);
 
       // Validate the response structure
       if (!parsed.intent || !['info', 'modification'].includes(parsed.intent)) {
-        throw new Error('Invalid intent in AI response');
+        this.logger.warn('Invalid intent in AI response, defaulting to info');
+        parsed.intent = 'info';
       }
 
       if (
@@ -353,7 +377,7 @@ Analyze the message and respond with JSON only.`;
       this.logger.error(
         `Failed to parse AI classification response: ${error.message}`,
       );
-      this.logger.debug(`Raw AI response: ${response}`);
+      this.logger.debug(`Raw AI response: ${response.substring(0, 300)}`);
 
       // Fallback to info if parsing fails
       return {
@@ -362,6 +386,25 @@ Analyze the message and respond with JSON only.`;
         reasoning: 'Failed to parse AI response, defaulting to info',
       };
     }
+  }
+
+  /**
+   * Clean JSON string for classification parsing
+   */
+  private cleanClassificationJsonString(jsonStr: string): string {
+    // Remove control characters except \t, \n, \r
+    jsonStr = jsonStr.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+    // Fix unescaped newlines in string values
+    jsonStr = jsonStr.replace(
+      /"([^"]*?)(\n)([^"]*?)"/g,
+      (match, before, newline, after) => `"${before}\\n${after}"`,
+    );
+
+    // Fix trailing commas
+    jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+
+    return jsonStr;
   }
 
   /**

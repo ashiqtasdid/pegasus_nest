@@ -1,0 +1,52 @@
+{
+  "name": "pegasus-nest-agent-dashboard",
+  "version": "1.0.0",
+  "description": "VS Code-inspired real-time dashboard for monitoring Minecraft plugin creation using intelligent agents",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js --port 8080",
+    "serve": "python -m http.server 8080",
+    "test": "echo \"No tests specified\" && exit 0",
+    "preview": "npx live-server --port=8080 --open=index.html",
+    "build": "echo \"Static files - no build required\"",
+    "lint": "echo \"Linting not configured\"",
+    "format": "echo \"Formatting not configured\""
+  },
+  "keywords": [
+    "minecraft",
+    "plugin",
+    "agent",
+    "dashboard",
+    "websocket",
+    "real-time",
+    "vs-code",
+    "monitoring",
+    "feedback"
+  ],
+  "author": "Pegasus Nest Development Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/pegasus-nest.git",
+    "directory": "frontend"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/pegasus-nest/issues"
+  },
+  "homepage": "https://github.com/your-username/pegasus-nest#readme",
+  "devDependencies": {
+    "live-server": "^1.2.2"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  },
+  "browserslist": [
+    "last 2 versions",
+    "not dead",
+    "not < 2%"
+  ]
+}

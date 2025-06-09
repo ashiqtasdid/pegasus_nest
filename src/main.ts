@@ -6,6 +6,7 @@ import { SecurityService } from './common/security.service';
 import { RobustnessService } from './common/robustness.service';
 import { Logger } from '@nestjs/common';
 import compression = require('compression');
+import { join } from 'path';
 
 async function bootstrap() {
   // Optimize V8 garbage collection for production and Docker
@@ -42,9 +43,14 @@ async function bootstrap() {
   // Get security and robustness services
   const securityService = app.get(SecurityService);
   const robustnessService = app.get(RobustnessService);
-
   // Apply security middleware
   securityService.configureSecurityMiddleware(app);
+
+  // Serve static files from public directory
+  app.useStaticAssets(join(__dirname, '..', 'public'), {
+    index: 'index.html',
+    prefix: '/',
+  });
 
   // Setup graceful shutdown
   robustnessService.setupGracefulShutdown();
@@ -85,12 +91,10 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-
   // Force immediate console output
   console.log(`🚀 Pegasus Nest API is running on http://localhost:${port}`);
   console.log(`🛡️ Security and robustness features are active`);
   console.log(`⚡ Performance optimizations enabled`);
-  console.log(`📊 Health check: http://localhost:${port}/health`);
 
   Logger.log(
     `🚀 Pegasus Nest API is running on http://localhost:${port}`,

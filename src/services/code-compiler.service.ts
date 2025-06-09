@@ -13,6 +13,7 @@ import { promisify } from 'util';
 import { GeminiService } from './gemini.service';
 import { RobustnessService } from '../common/robustness.service';
 import { ValidationService } from '../common/validation.service';
+import { PluginStatusGateway } from '../gateways/plugin-status.gateway';
 
 // Enhanced exec exception interface
 interface EnhancedExecException extends ExecException {
@@ -141,6 +142,7 @@ export class CodeCompilerService {
     private readonly geminiService: GeminiService,
     private readonly robustnessService: RobustnessService,
     private readonly validationService: ValidationService,
+    private readonly pluginStatusGateway: PluginStatusGateway,
   ) {
     this.logger.log('CodeCompilerService initialized with robustness features');
   } /**
@@ -173,11 +175,24 @@ export class CodeCompilerService {
             };
           }
 
+          // Extract plugin name for WebSocket emissions
+          const pluginName = path.basename(
+            validation.sanitizedData.projectPath,
+          );
+
+          // Emit compilation start
+          this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+            stage: 'initialization',
+            percentage: 0,
+            message: 'Starting Maven compilation...',
+          });
+
           // Proceed with internal compilation
           return this.compileMavenProjectInternal(
-            validation.sanitizedData!.projectPath,
+            validation.sanitizedData.projectPath,
             true,
             true,
+            pluginName,
           );
         },
         // Fallback when circuit breaker is open
@@ -254,16 +269,27 @@ export class CodeCompilerService {
    * @param projectPath Path to the project directory
    * @param autoFix Whether to automatically attempt to fix compilation errors
    * @param useAI Whether to use AI for fixing when autoFix fails
+   * @param pluginName Plugin name for WebSocket notifications
    * @returns CompilationResult with structured compilation status and errors
    */ private async compileMavenProjectInternal(
     projectPath: string,
     autoFix: boolean,
     useAI: boolean,
+    pluginName?: string,
   ): Promise<CompilationResult> {
     const startTime = Date.now();
     this.logger.log(
       `Compiling Maven project at: ${projectPath} (autoFix: ${autoFix}, useAI: ${useAI})`,
     );
+
+    // Emit validation stage if plugin name is provided
+    if (pluginName) {
+      this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+        stage: 'validation',
+        percentage: 10,
+        message: 'Validating project structure...',
+      });
+    }
 
     // Validate project path for security
     if (!this.isValidProjectPath(projectPath)) {
@@ -272,6 +298,17 @@ export class CodeCompilerService {
         'compilation_security',
         new Error(error),
       );
+
+      if (pluginName) {
+        this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+          stage: 'validation',
+          percentage: 0,
+          message: 'Security validation failed',
+          success: false,
+          error: error,
+        });
+      }
+
       return {
         success: false,
         output: 'Invalid project path specified.',
@@ -284,6 +321,17 @@ export class CodeCompilerService {
       const pomPath = path.join(projectPath, 'pom.xml');
       if (!fs.existsSync(pomPath)) {
         this.logger.warn('No pom.xml found in project directory');
+
+        if (pluginName) {
+          this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+            stage: 'validation',
+            percentage: 0,
+            message: 'pom.xml not found',
+            success: false,
+            error: 'Missing pom.xml',
+          });
+        }
+
         return {
           success: false,
           output:
@@ -292,15 +340,41 @@ export class CodeCompilerService {
         };
       }
 
+      if (pluginName) {
+        this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+          stage: 'validation',
+          percentage: 20,
+          message: 'Validating pom.xml structure...',
+        });
+      }
+
       // Validate pom.xml structure before compilation
       const pomValidation = await this.validatePomXml(pomPath);
       if (!pomValidation.valid) {
         this.logger.warn(`Invalid pom.xml: ${pomValidation.error}`);
 
         if (autoFix && pomValidation.fixable) {
+          if (pluginName) {
+            this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+              stage: 'auto-fix',
+              percentage: 25,
+              message: 'Auto-fixing pom.xml issues...',
+            });
+          }
+
           await this.fixPomXml(pomPath, pomValidation.issues || []);
           this.logger.log('Automatically fixed pom.xml issues');
         } else {
+          if (pluginName) {
+            this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+              stage: 'validation',
+              percentage: 0,
+              message: 'pom.xml validation failed',
+              success: false,
+              error: 'Invalid pom.xml structure',
+            });
+          }
+
           return {
             success: false,
             output: `Invalid pom.xml: ${pomValidation.error}`,
@@ -312,6 +386,14 @@ export class CodeCompilerService {
       // Pre-verify Minecraft plugin structure
       const isMinecraftPlugin = await this.isMinecraftPlugin(projectPath);
       if (isMinecraftPlugin) {
+        if (pluginName) {
+          this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+            stage: 'plugin-validation',
+            percentage: 30,
+            message: 'Validating Minecraft plugin structure...',
+          });
+        }
+
         const pluginValidation =
           await this.validateMinecraftPlugin(projectPath);
         if (!pluginValidation.valid) {
@@ -320,6 +402,14 @@ export class CodeCompilerService {
           );
 
           if (autoFix && pluginValidation.fixable) {
+            if (pluginName) {
+              this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+                stage: 'auto-fix',
+                percentage: 35,
+                message: 'Auto-fixing Minecraft plugin issues...',
+              });
+            }
+
             await this.fixMinecraftPluginStructure(
               projectPath,
               pluginValidation.issues || [],
@@ -337,6 +427,14 @@ export class CodeCompilerService {
 
       // Run Maven clean install with better error capture
       this.logger.log('Running mvn clean install...');
+      if (pluginName) {
+        this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+          stage: 'maven-execution',
+          percentage: 40,
+          message: 'Running Maven clean install...',
+        });
+      }
+
       try {
         // Use a timeout to prevent hanging builds (10 minutes)
         const { stdout, stderr } = await this.execWithTimeout(
@@ -357,7 +455,18 @@ export class CodeCompilerService {
           (stdout &&
             (stdout.includes('BUILD FAILURE') || stdout.includes('[ERROR]')));
         if (buildFailed) {
-          this.logger.warn('Maven compilation failed'); // Parse structured errors for better diagnostics
+          this.logger.warn('Maven compilation failed');
+          if (pluginName) {
+            this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+              stage: 'maven-execution',
+              percentage: 40,
+              message: 'Maven build failed',
+              success: false,
+              error: stderr || stdout,
+            });
+          }
+
+          // Parse structured errors for better diagnostics
           const parsedErrors = this.parseMavenErrors(stdout, stderr);
 
           // Attempt auto-fix if enabled
@@ -365,6 +474,14 @@ export class CodeCompilerService {
             this.logger.log(
               `Attempting to auto-fix ${parsedErrors.length} compilation errors`,
             );
+            if (pluginName) {
+              this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+                stage: 'auto-fix',
+                percentage: 45,
+                message: `Auto-fixing ${parsedErrors.length} compilation errors...`,
+              });
+            }
+
             const fixResult = await this.attemptAutoFix(
               projectPath,
               parsedErrors,
@@ -372,18 +489,42 @@ export class CodeCompilerService {
             if (fixResult.fixed) {
               // Retry compilation after fixes
               this.logger.log('Retrying compilation after applying fixes');
+              if (pluginName) {
+                this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+                  stage: 'retry',
+                  percentage: 50,
+                  message: 'Retrying compilation after auto-fixes...',
+                });
+              }
               return this.compileMavenProjectInternal(
                 projectPath,
                 false,
                 false,
+                pluginName,
               ); // Don't auto-fix again to prevent loops
             } else {
-              this.logger.warn(`Auto-fix failed: ${fixResult.reason}`); // Try AI-based fixing if enabled and auto-fix failed
+              this.logger.warn(`Auto-fix failed: ${fixResult.reason}`);
+              if (pluginName) {
+                this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+                  stage: 'auto-fix-failed',
+                  percentage: 50,
+                  message: `Auto-fix failed: ${fixResult.reason}`,
+                });
+              }
+
+              // Try AI-based fixing if enabled and auto-fix failed
               if (useAI) {
                 this.logger.log('🤖 Attempting AI-based error fixing...');
                 this.logger.log(
                   `📊 Found ${parsedErrors.length} compilation errors to analyze`,
                 );
+                if (pluginName) {
+                  this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+                    stage: 'ai-fix',
+                    percentage: 55,
+                    message: 'Attempting AI-based error fixing...',
+                  });
+                }
                 try {
                   const aiFixResult = await this.fixWithAI(
                     projectPath,
@@ -396,15 +537,38 @@ export class CodeCompilerService {
                     this.logger.log(
                       '✅ AI-based fixes applied successfully, retrying compilation',
                     );
+                    if (pluginName) {
+                      this.pluginStatusGateway.emitCompilationProgress(
+                        pluginName,
+                        {
+                          stage: 'ai-retry',
+                          percentage: 60,
+                          message: 'AI fixes applied, retrying compilation...',
+                        },
+                      );
+                    }
                     return this.compileMavenProjectInternal(
                       projectPath,
                       false,
                       false,
+                      pluginName,
                     ); // Don't auto-fix or use AI again to prevent loops
                   } else {
                     this.logger.warn(
                       `❌ AI-based fixing failed: ${aiFixResult.reason}`,
                     );
+                    if (pluginName) {
+                      this.pluginStatusGateway.emitCompilationProgress(
+                        pluginName,
+                        {
+                          stage: 'ai-fix',
+                          percentage: 55,
+                          message: 'AI-based fixing failed',
+                          success: false,
+                          error: aiFixResult.reason,
+                        },
+                      );
+                    }
                   }
                 } catch (error) {
                   this.logger.error(
@@ -430,6 +594,14 @@ export class CodeCompilerService {
 
         // Find the generated JAR file in target directory with enhanced validation
         const targetDir = path.join(projectPath, 'target');
+        if (pluginName) {
+          this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+            stage: 'jar-search',
+            percentage: 85,
+            message: 'Searching for generated JAR file...',
+          });
+        }
+
         if (fs.existsSync(targetDir)) {
           const jarFiles = fs
             .readdirSync(targetDir)
@@ -454,12 +626,29 @@ export class CodeCompilerService {
 
             // Validate JAR contents for Minecraft plugins
             if (isMinecraftPlugin) {
+              if (pluginName) {
+                this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+                  stage: 'jar-validation',
+                  percentage: 90,
+                  message: 'Validating JAR contents...',
+                });
+              }
+
               const jarValidation =
                 await this.validateJarContents(artifactPath);
               if (!jarValidation.valid) {
                 this.logger.warn(
                   `Generated JAR has issues: ${jarValidation.error}`,
                 );
+                if (pluginName) {
+                  this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+                    stage: 'jar-validation',
+                    percentage: 90,
+                    message: `JAR validation issues: ${jarValidation.error}`,
+                    success: false,
+                    error: jarValidation.error,
+                  });
+                }
                 return {
                   success: true,
                   output: `Maven build successful but JAR has issues: ${jarValidation.error}`,
@@ -468,7 +657,17 @@ export class CodeCompilerService {
                 };
               }
             }
+
             this.robustnessService.recordSuccess('maven_compilation');
+            if (pluginName) {
+              this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+                stage: 'complete',
+                percentage: 100,
+                message: 'Compilation completed successfully!',
+                success: true,
+              });
+            }
+
             return {
               success: true,
               output: `Maven build successful: ${stdout}`,
@@ -478,6 +677,16 @@ export class CodeCompilerService {
         }
 
         // Handle the case where build succeeded but no JAR was found
+        if (pluginName) {
+          this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+            stage: 'complete',
+            percentage: 100,
+            message: 'Build completed but no JAR artifact found',
+            success: false,
+            error: 'No JAR file was generated',
+          });
+        }
+
         return {
           success: true,
           output: `Maven build completed but no JAR file was found: ${stdout}`,
@@ -515,6 +724,16 @@ export class CodeCompilerService {
           errorOutput.includes('timed out');
 
         if (isTimeout) {
+          if (pluginName) {
+            this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+              stage: 'maven-execution',
+              percentage: 50,
+              message: 'Maven build timed out',
+              success: false,
+              error: 'Build process took too long to complete',
+            });
+          }
+
           return {
             success: false,
             output: stdout || '',
@@ -551,6 +770,7 @@ export class CodeCompilerService {
                 projectPath,
                 false,
                 false,
+                pluginName,
               ); // Don't auto-fix again to prevent loops
             } else {
               this.logger.warn(
@@ -581,6 +801,7 @@ export class CodeCompilerService {
                       projectPath,
                       false,
                       false,
+                      pluginName,
                     ); // Don't auto-fix or use AI again to prevent loops
                   } else {
                     this.logger.warn(
@@ -601,6 +822,16 @@ export class CodeCompilerService {
               }
             }
           }
+        }
+
+        if (pluginName) {
+          this.pluginStatusGateway.emitCompilationProgress(pluginName, {
+            stage: 'error',
+            percentage: 0,
+            message: 'Compilation failed with errors',
+            success: false,
+            error: errorOutput,
+          });
         }
 
         return {
@@ -2299,19 +2530,59 @@ IMPORTANT RULES:
 
 Respond ONLY with the JSON object, no additional text.`;
   }
-
   /**
    * Parse AI response to extract file operations
    */
   private parseAIFixResponse(aiResponse: string): any {
     try {
-      // Try to find JSON in the response
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      // Strategy 1: Clean the response and extract JSON
+      let cleanResponse = aiResponse.trim();
+
+      // Remove markdown code blocks if present
+      cleanResponse = cleanResponse
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '')
+        .replace(/^\uFEFF/, ''); // Remove BOM
+
+      // Strategy 2: Find complete JSON with balanced braces
+      const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        throw new Error('No JSON found in AI response');
+        this.logger.warn(
+          'No JSON found in AI response, returning empty structure',
+        );
+        return {
+          analysis: 'No analysis provided - JSON parsing failed',
+          createdFiles: [],
+          modifiedFiles: [],
+          deletedFiles: [],
+        };
       }
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      let jsonStr = jsonMatch[0];
+
+      // Strategy 3: Balance braces to find complete JSON
+      let braceCount = 0;
+      let lastValidEnd = -1;
+      for (let i = 0; i < jsonStr.length; i++) {
+        if (jsonStr[i] === '{') {
+          braceCount++;
+        } else if (jsonStr[i] === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            lastValidEnd = i;
+            break;
+          }
+        }
+      }
+
+      if (lastValidEnd > 0) {
+        jsonStr = jsonStr.substring(0, lastValidEnd + 1);
+      }
+
+      // Strategy 4: Clean common JSON issues
+      jsonStr = this.cleanJsonForParsing(jsonStr);
+
+      const parsed = JSON.parse(jsonStr);
 
       // Validate and normalize the response structure
       return {
@@ -2322,8 +2593,47 @@ Respond ONLY with the JSON object, no additional text.`;
       };
     } catch (error) {
       this.logger.error(`Failed to parse AI fix response: ${error.message}`);
-      throw new Error(`Invalid AI response format: ${error.message}`);
+      this.logger.debug(
+        `Raw AI response (first 500 chars): ${aiResponse.substring(0, 500)}`,
+      );
+
+      // Return fallback structure instead of throwing
+      return {
+        analysis: `Parse error: ${error.message}`,
+        createdFiles: [],
+        modifiedFiles: [],
+        deletedFiles: [],
+      };
     }
+  }
+
+  /**
+   * Clean JSON string to fix common parsing issues
+   */
+  private cleanJsonForParsing(jsonStr: string): string {
+    // Remove control characters except \t, \n, \r
+    jsonStr = jsonStr.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+    // Fix unescaped quotes in string values
+    jsonStr = jsonStr.replace(
+      /"([^"]*?)"(\s*:\s*)"([^"]*?)"/g,
+      (match, key, colon, value) => {
+        // Escape quotes within the value
+        const escapedValue = value.replace(/"/g, '\\"');
+        return `"${key}"${colon}"${escapedValue}"`;
+      },
+    );
+
+    // Fix unescaped newlines in string values
+    jsonStr = jsonStr.replace(
+      /"([^"]*?)(\n)([^"]*?)"/g,
+      (match, before, newline, after) => `"${before}\\n${after}"`,
+    );
+
+    // Fix trailing commas
+    jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+
+    return jsonStr;
   }
 
   /**

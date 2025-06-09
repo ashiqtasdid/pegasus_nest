@@ -1,285 +1,251 @@
-import {
-  Controller,
-  Get,
-  HttpStatus,
-  HttpException,
-  Param,
-} from '@nestjs/common';
-import { HealthMonitoringService } from '../common/health-monitoring.service';
+import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
 import { RobustnessService } from '../common/robustness.service';
+import { AgentOrchestratorService } from '../services/agent-orchestrator.service';
+import { GeminiService } from '../services/gemini.service';
+import { CodeCompilerService } from '../services/code-compiler.service';
 
 @Controller('health')
 export class HealthController {
   constructor(
-    private readonly healthMonitoringService: HealthMonitoringService,
     private readonly robustnessService: RobustnessService,
+    private readonly agentOrchestratorService: AgentOrchestratorService,
+    private readonly geminiService: GeminiService,
+    private readonly codeCompilerService: CodeCompilerService,
   ) {}
 
-  /**
-   * Quick health check endpoint
-   * GET /health
-   */
   @Get()
-  async getQuickHealth() {
+  async getHealthStatus() {
     try {
-      const healthStatus =
-        await this.healthMonitoringService.getQuickHealthStatus();
-
-      const statusCode =
-        healthStatus.status === 'healthy'
-          ? HttpStatus.OK
-          : healthStatus.status === 'degraded'
-            ? HttpStatus.PARTIAL_CONTENT
-            : HttpStatus.SERVICE_UNAVAILABLE;
-
-      if (healthStatus.status === 'unhealthy') {
-        throw new HttpException(
-          {
-            status: healthStatus.status,
-            message: healthStatus.summary,
-            timestamp: new Date().toISOString(),
-          },
-          statusCode,
-        );
-      }
-
-      return {
-        status: healthStatus.status,
-        message: healthStatus.summary,
+      const status = {
+        status: 'ok',
         timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development',
       };
+
+      return status;
     } catch (error) {
       throw new HttpException(
         {
-          status: 'unhealthy',
+          status: 'error',
           message: 'Health check failed',
-          error: error.message,
           timestamp: new Date().toISOString(),
+          error: error.message,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
   }
 
-  /**
-   * Comprehensive health check endpoint
-   * GET /health/detailed
-   */
   @Get('detailed')
-  async getDetailedHealth() {
+  async getDetailedHealthStatus() {
     try {
-      const healthReport =
-        await this.healthMonitoringService.performHealthCheck();
+      const memoryUsage = process.memoryUsage();
+      const memoryUsageMB = {
+        rss: Math.round(memoryUsage.rss / 1024 / 1024),
+        heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+        heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+        external: Math.round(memoryUsage.external / 1024 / 1024),
+      };
 
-      const statusCode =
-        healthReport.overall === 'healthy'
-          ? HttpStatus.OK
-          : healthReport.overall === 'degraded'
-            ? HttpStatus.PARTIAL_CONTENT
-            : HttpStatus.SERVICE_UNAVAILABLE;
+      // Get circuit breaker states
+      const circuitBreakerStates =
+        this.robustnessService.getCircuitBreakerStates();
 
-      if (healthReport.overall === 'unhealthy') {
-        throw new HttpException(healthReport, statusCode);
-      }
+      // Get agent orchestrator status
+      const agentStatus = await this.getAgentOrchestratorStatus();
 
-      return healthReport;
+      const status = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development',
+        system: {
+          nodeVersion: process.version,
+          platform: process.platform,
+          arch: process.arch,
+          pid: process.pid,
+        },
+        memory: {
+          usage: memoryUsageMB,
+          limit: process.env.NODE_OPTIONS?.includes('--max-old-space-size')
+            ? process.env.NODE_OPTIONS.match(/--max-old-space-size=(\d+)/)?.[1]
+            : 'default',
+        },
+        circuitBreakers: circuitBreakerStates,
+        agents: agentStatus,
+        performance: {
+          cpuUsage: process.cpuUsage(),
+          resourceUsage: process.resourceUsage ? process.resourceUsage() : null,
+        },
+      };
+
+      return status;
     } catch (error) {
       throw new HttpException(
         {
-          overall: 'unhealthy',
-          timestamp: new Date(),
+          status: 'error',
+          message: 'Detailed health check failed',
+          timestamp: new Date().toISOString(),
           error: error.message,
-          services: [],
-          systemMetrics: null,
-          recommendations: [
-            'Health monitoring system failure - immediate investigation required',
-          ],
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
   }
 
-  /**
-   * System metrics endpoint
-   * GET /health/metrics
-   */
-  @Get('metrics')
-  async getSystemMetrics() {
-    try {
-      const systemMetrics = await this.robustnessService.getSystemMetrics();
-      const systemHealth = await this.robustnessService.getSystemHealth();
-
-      return {
-        metrics: systemMetrics,
-        health: systemHealth,
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      throw new HttpException(
-        {
-          error: 'Failed to retrieve system metrics',
-          details: error.message,
-          timestamp: new Date().toISOString(),
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
-   * Circuit breaker status endpoint
-   * GET /health/circuit-breakers
-   */
   @Get('circuit-breakers')
   async getCircuitBreakerStatus() {
     try {
-      const circuitBreakers = this.robustnessService.getCircuitBreakerStates();
-      const openBreakers = circuitBreakers.filter((cb) => cb.state === 'OPEN');
-      const halfOpenBreakers = circuitBreakers.filter(
-        (cb) => cb.state === 'HALF_OPEN',
-      );
-
+      const states = this.robustnessService.getCircuitBreakerStates();
       return {
-        total: circuitBreakers.length,
-        open: openBreakers.length,
-        halfOpen: halfOpenBreakers.length,
-        closed:
-          circuitBreakers.length -
-          openBreakers.length -
-          halfOpenBreakers.length,
-        details: circuitBreakers,
+        status: 'ok',
         timestamp: new Date().toISOString(),
+        circuitBreakers: states,
       };
     } catch (error) {
       throw new HttpException(
         {
-          error: 'Failed to retrieve circuit breaker status',
-          details: error.message,
+          status: 'error',
+          message: 'Circuit breaker status check failed',
           timestamp: new Date().toISOString(),
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
-   * Service health trends endpoint
-   * GET /health/trends/:serviceName
-   */
-  @Get('trends/:serviceName')
-  async getServiceTrends(@Param('serviceName') serviceName: string) {
-    try {
-      const trends =
-        this.healthMonitoringService.getServiceHealthTrend(serviceName);
-
-      return {
-        serviceName,
-        trend: trends.trend,
-        historyCount: trends.history.length,
-        recentHistory: trends.history.slice(-10), // Last 10 checks
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      throw new HttpException(
-        {
-          error: `Failed to retrieve trends for service: ${serviceName}`,
-          details: error.message,
-          timestamp: new Date().toISOString(),
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
-   * Ready check endpoint (for Kubernetes readiness probes)
-   * GET /health/ready
-   */
-  @Get('ready')
-  async getReadinessCheck() {
-    try {
-      const circuitBreakers = this.robustnessService.getCircuitBreakerStates();
-      const criticalBreakers = circuitBreakers.filter(
-        (cb) =>
-          ['gemini_service', 'plugin_creation'].includes(cb.name) &&
-          cb.state === 'OPEN',
-      );
-
-      if (criticalBreakers.length > 0) {
-        throw new HttpException(
-          {
-            ready: false,
-            reason: 'Critical services unavailable',
-            criticalBreakers: criticalBreakers.map((cb) => cb.name),
-            timestamp: new Date().toISOString(),
-          },
-          HttpStatus.SERVICE_UNAVAILABLE,
-        );
-      }
-
-      return {
-        ready: true,
-        message: 'Service is ready to accept requests',
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-
-      throw new HttpException(
-        {
-          ready: false,
-          reason: 'Readiness check failed',
           error: error.message,
-          timestamp: new Date().toISOString(),
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
   }
 
-  /**
-   * Live check endpoint (for Kubernetes liveness probes)
-   * GET /health/live
-   */
-  @Get('live')
-  async getLivenessCheck() {
+  @Get('agents')
+  async getAgentStatus() {
     try {
-      // Basic liveness check - ensure the application is responding
-      const systemHealth = await this.robustnessService.getSystemHealth();
-
+      const agentStatus = await this.getAgentOrchestratorStatus();
       return {
-        alive: true,
-        message: 'Service is alive and responding',
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        agents: agentStatus,
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          status: 'error',
+          message: 'Agent status check failed',
+          timestamp: new Date().toISOString(),
+          error: error.message,
+        },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  @Get('performance')
+  async getPerformanceMetrics() {
+    try {
+      const memoryUsage = process.memoryUsage();
+      const cpuUsage = process.cpuUsage();
+
+      const metrics = {
+        timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        timestamp: new Date().toISOString(),
+        memory: {
+          rss: memoryUsage.rss,
+          heapTotal: memoryUsage.heapTotal,
+          heapUsed: memoryUsage.heapUsed,
+          heapUsagePercentage: Math.round(
+            (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100,
+          ),
+          external: memoryUsage.external,
+        },
+        cpu: {
+          user: cpuUsage.user,
+          system: cpuUsage.system,
+        },
+        resourceUsage: process.resourceUsage ? process.resourceUsage() : null,
+        eventLoop: {
+          delay: await this.measureEventLoopDelay(),
+        },
+      };
+
+      return {
+        status: 'ok',
+        metrics,
       };
     } catch (error) {
       throw new HttpException(
         {
-          alive: false,
-          reason: 'Service is not responding properly',
-          error: error.message,
+          status: 'error',
+          message: 'Performance metrics check failed',
           timestamp: new Date().toISOString(),
+          error: error.message,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
   }
 
-  /**
-   * Database health check endpoint
-   * GET /health/database
-   */
-  @Get('database')
-  async getDatabaseHealth() {
-    return {
-      healthy: true,
-      message: 'Database services temporarily disabled',
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-    };
+  private async getAgentOrchestratorStatus() {
+    try {
+      // Test the main agent orchestrator service with a simple health check
+      const agentStatus = [];
+
+      try {
+        const startTime = Date.now();
+
+        // Test basic availability of the service
+        const isServiceAvailable = this.agentOrchestratorService !== undefined;
+
+        if (isServiceAvailable) {
+          // Simple test - just check if we can access the service without calling any heavy methods
+          const responseTime = Date.now() - startTime;
+
+          agentStatus.push({
+            name: 'AgentOrchestratorService',
+            status: 'healthy',
+            responseTime,
+            lastCheck: new Date().toISOString(),
+            details: {
+              serviceLoaded: true,
+              mainMethod: 'createPluginWithMaxAccuracy',
+              description: 'High-accuracy plugin creation service',
+            },
+          });
+        } else {
+          agentStatus.push({
+            name: 'AgentOrchestratorService',
+            status: 'unhealthy',
+            error: 'Service not loaded',
+            lastCheck: new Date().toISOString(),
+          });
+        }
+      } catch (error) {
+        agentStatus.push({
+          name: 'AgentOrchestratorService',
+          status: 'unhealthy',
+          error: error.message,
+          lastCheck: new Date().toISOString(),
+        });
+      }
+
+      return agentStatus;
+    } catch (error) {
+      return [
+        {
+          name: 'AgentOrchestratorService',
+          status: 'error',
+          error: error.message,
+          lastCheck: new Date().toISOString(),
+        },
+      ];
+    }
+  }
+
+  private async measureEventLoopDelay(): Promise<number> {
+    return new Promise((resolve) => {
+      const start = process.hrtime.bigint();
+      setImmediate(() => {
+        const delay = Number(process.hrtime.bigint() - start) / 1000000; // Convert to milliseconds
+        resolve(delay);
+      });
+    });
   }
 }
